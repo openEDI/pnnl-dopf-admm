@@ -1,0 +1,1136 @@
+import copy
+from pprint import pprint
+import numpy as np
+import logging
+import networkx as nx
+from pprint import pprint
+from enum import IntEnum
+from typing import Tuple
+from dataclasses import dataclass, field, asdict
+from oedisi.types.data_types import (
+    AdmittanceMatrix,
+    AdmittanceSparse,
+    CommandList,
+    EquipmentNodeArray,
+    Injection,
+    InverterControlList,
+    MeasurementArray,
+    PowersImaginary,
+    PowersReal,
+    Topology,
+    Incidence,
+    VoltagesAngle,
+    VoltagesImaginary,
+    VoltagesMagnitude,
+    VoltagesReal,
+)
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
+logger.setLevel(logging.DEBUG)
+
+
+@dataclass
+class Branch:
+    fr_bus: str
+    to_bus: str
+    tag: str
+    idx: int = 0
+    fr_idx: int = 0
+    to_idx: int = 0
+    phases: list[int] = field(default_factory=lambda: [0] * 3)
+    zprim: list[list[list[float]]] = field(
+        default_factory=lambda: np.zeros((3, 3, 2)).tolist()
+    )
+    y: list[list[complex]] = field(
+        default_factory=lambda: np.zeros((3, 3), dtype=complex).tolist()
+    )
+
+
+@dataclass
+class BranchInfo:
+    branches: dict[Branch] = field(default_factory=dict)
+
+
+@dataclass
+class Bus:
+    idx: int = 0
+    tags: list[str] = field(default_factory=list)
+    phases: list[int] = field(default_factory=lambda: [0] * 3)
+    base_kv: float = 0.0
+    tap_ratio: float = 0.0
+    base_pq: list[list[float]] = field(
+        default_factory=lambda: np.zeros((3, 2)).tolist()
+    )
+    base_pv: list[list[float]] = field(
+        default_factory=lambda: np.zeros((3, 2)).tolist()
+    )
+    kv: float = 0.0
+    kvs: list[float] = field(default_factory=lambda: [0.0] * 3)
+    pq: list[list[float]] = field(
+        default_factory=lambda: np.zeros((3, 2)).tolist())
+    pv: list[list[float]] = field(
+        default_factory=lambda: np.zeros((3, 2)).tolist())
+
+
+@dataclass
+class BusInfo:
+    buses: dict[Bus] = field(default_factory=dict)
+
+
+def check_radiality(branch_info: BranchInfo, bus_info: BusInfo) -> bool:
+    # print(len(bus_info.buses), len(branch_info.branches))
+    if len(bus_info.buses) - len(branch_info.branches) == 1:
+        return True
+
+    logger.debug("Network is not Radial")
+    logger.debug(f"Branch: {branch_info.branches.keys()}")
+    logger.debug(f"Bus: {bus_info.buses.keys()}")
+    return False
+
+
+def index_info(branch_info: BranchInfo, bus_info: BusInfo) -> (BranchInfo, BusInfo):
+    for i, bus in enumerate(bus_info.buses.values()):
+        bus.idx = i
+
+    for i, branch in enumerate(branch_info.branches.values()):
+        branch.idx = i
+        branch.fr_idx = bus_info.buses[branch.fr_bus].idx
+        branch.to_idx = bus_info.buses[branch.to_bus].idx
+
+    return (branch_info, bus_info)
+
+
+def generate_zprim(branch_info: BranchInfo) -> BranchInfo:
+    for branch in branch_info.branches.values():
+        z = -1 * np.linalg.pinv(branch.y)
+        branch.y = []
+        for idx, value in np.ndenumerate(z):
+            row = idx[0]
+            col = idx[1]
+            branch.zprim[row][col] = [float(value.real), float(value.imag)]
+    return branch_info
+
+
+def extract_base_voltages(bus_info: BusInfo, voltages: VoltagesMagnitude) -> dict:
+    for id, voltage in zip(voltages.ids, voltages.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in bus_info.buses:
+            continue
+
+        bus_info.buses[name].base_kv = voltage / 1000.0
+        bus_info.buses[name].phases[phase] = phase + 1
+    return bus_info
+
+
+def extract_voltages(bus_info: BusInfo, voltages: VoltagesMagnitude) -> dict:
+    for id, voltage in zip(voltages.ids, voltages.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in bus_info.buses:
+            continue
+
+        bus_info.buses[name].kvs[phase] = voltage / 1000.0
+
+    for k, v in bus_info.buses.items():
+        kv = 0
+        n = 0
+        for p in v.phases:
+            if p != 0:
+                n += 1
+                kv += v.kvs[p-1]
+        bus_info.buses[k].kv = kv/n
+    return bus_info
+
+
+def pack_voltages(voltages: dict, bus_info: BusInfo, time: int) -> VoltagesMagnitude:
+    ids = []
+    values = []
+    for key, value in voltages.items():
+        busid, phase = key.split(".", 1)
+        if busid in bus_info.buses:
+            ids.append(key)
+            values.append(value)
+    return VoltagesMagnitude(ids=ids, values=values, time=time)
+
+
+def switch_voltages(voltages: dict, bus_info: BusInfo, time: int, switches: list) -> VoltagesMagnitude:
+    ids = []
+    values = []
+    for key, value in voltages.items():
+        busid, phase = key.split(".", 1)
+        if busid not in switches:
+            continue
+
+        if busid in bus_info.buses:
+            ids.append(key)
+            values.append(value)
+    return VoltagesMagnitude(ids=ids, values=values, time=time)
+
+
+def pack_powers_real(base: PowersReal, powers: dict, time: int) -> PowersReal:
+    ids = []
+    eq_ids = []
+    values = []
+    for id, eq in zip(base.ids, base.equipment_ids):
+        if id in powers:
+            ids.append(id)
+            eq_ids.append(eq)
+            values.append(round(powers[id], 6))
+    return PowersReal(ids=ids, equipment_ids=eq_ids, values=values, time=time)
+
+
+def pack_powers_imag(base: PowersImaginary, powers: dict, time: int) -> PowersImaginary:
+    ids = []
+    eq_ids = []
+    values = []
+    for id, eq in zip(base.ids, base.equipment_ids):
+        if id in powers:
+            ids.append(id)
+            eq_ids.append(eq)
+            values.append(round(powers[id], 6))
+    return PowersReal(ids=ids, equipment_ids=eq_ids, values=values, time=time)
+
+
+def extract_forecast(bus: dict, forecast) -> dict:
+    for eq, power in zip(forecast["ids"], forecast["values"]):
+        if "_" in eq:
+            [_, name] = eq.rsplit("_", 1)
+        else:
+            [_, name] = eq.rsplit(".", 1)
+        name = name.upper()
+
+        if name not in bus:
+            print("NOT IN BUS: ", name)
+            continue
+
+        phases = bus[name]["phases"]
+        for ph in phases:
+            phase = int(ph) - 1
+            logger.debug(f"{eq}.{ph} : {power/len(phases)}")
+            bus[name]["eqid"] = eq
+            bus[name]["pv"][phase][0] = power * 1000 / len(phases)
+            bus[name]["pv"][phase][1] = 0.0
+    return bus
+
+
+def update_boundary_voltage(v_self: VoltagesMagnitude, v_other: VoltagesMagnitude) -> (VoltagesMagnitude, float):
+    self_dict = {k: v for k, v in zip(v_self.ids, v_self.values)}
+    values = {}
+
+    error = 0
+    n = len(v_other.ids)
+    if n == 0:
+        n = 1
+
+    for idx, (id, voltage) in enumerate(zip(v_other.ids, v_other.values)):
+        if id not in self_dict.keys():
+            continue
+
+        if round(self_dict[id], 5) == round(voltage, 5):
+            continue
+
+        if id not in values.keys():
+            logger.debug(
+                f"update old bus: {id} from {self_dict[id]} to {voltage}")
+            error += abs(self_dict[id] - voltage)/voltage
+            values[id] = voltage
+        else:
+            avg_v = (values[id] + voltage)/2
+            logger.debug(f"update bus: {id} from {values[id]} to {avg_v}")
+            values[id] += avg_v
+
+    v_other.ids = values.keys()
+    v_other.values = values.values()
+    return v_other, error/n
+
+
+def update_boundary_power_real(p_other: PowersReal, area: str) -> (PowersReal, float):
+    values = {}
+    eqids = {}
+
+    error = 0
+    n = len(p_other.ids)
+    if n == 0:
+        n = 1
+
+    old = {}
+    for idx, (id, eq, power) in enumerate(zip(p_other.ids, p_other.equipment_ids, p_other.values)):
+        if area in eq:
+            old[id] = power
+
+    for idx, (id, eq, power) in enumerate(zip(p_other.ids, p_other.equipment_ids, p_other.values)):
+        if area in eq:
+            continue
+
+        if id not in values.keys():
+            values[id] = power
+            eqids[id] = eq
+            if id in old.keys():
+                logger.debug(f"update old bus: {id} from {old[id]} to {power}")
+                error += abs(old[id] - power)/power
+
+    p_other.ids = values.keys()
+    p_other.equipment_ids = eqids.values()
+    p_other.values = values.values()
+    return p_other, error/n
+
+
+def update_boundary_power_imag(p_other: PowersImaginary, area: str) -> (PowersImaginary, float):
+    values = {}
+    eqids = {}
+    old = {}
+
+    error = 0
+    n = len(p_other.ids)
+    if n == 0:
+        n = 1
+
+    for idx, (id, eq, power) in enumerate(zip(p_other.ids, p_other.equipment_ids, p_other.values)):
+        if area in eq:
+            old[id] = power
+
+    for idx, (id, eq, power) in enumerate(zip(p_other.ids, p_other.equipment_ids, p_other.values)):
+        if area in eq:
+            continue
+
+        if id not in values.keys():
+            values[id] = power
+            eqids[id] = eq
+            if id in old.keys():
+                # logger.debug(f"update old bus: {id} from {old[id]} to {power}")
+                error += abs(old[id] - power)/power
+
+    p_other.ids = values.keys()
+    p_other.equipment_ids = eqids.values()
+    p_other.values = values.values()
+    return p_other, error/n
+
+
+def filter_boundary_voltage(shared: list[str], voltages: VoltagesMagnitude) -> VoltagesMagnitude:
+    ids = []
+    values = []
+    for id, voltage in zip(voltages.ids, voltages.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in shared:
+            continue
+
+        ids.append(id)
+        values.append(voltage)
+
+    voltages.ids = ids
+    voltages.values = values
+    return voltages
+
+
+def filter_line_power_real(shared: list[str], powers: PowersReal, area: str = "") -> PowersReal:
+    if area != "":
+        area += "/"
+
+    ids = []
+    eqids = []
+    values = []
+    for id, eq, power in zip(powers.ids, powers.equipment_ids, powers.values):
+        name, phase = id.split(".", 1)
+        fr_bus, to_bus = name.split("_", 1)
+
+        if not (fr_bus in shared or to_bus in shared):
+            continue
+
+        branch = f"{area}{fr_bus}_{to_bus}.{phase}"
+        ids.append(f"{fr_bus}.{phase}")
+        eqids.append(branch)
+        values.append(power)
+
+        branch = f"{area}{to_bus}_{fr_bus}.{phase}"
+        ids.append(f"{to_bus}.{phase}")
+        eqids.append(branch)
+        values.append(-power)
+
+    powers.ids = ids
+    powers.equipment_ids = eqids
+    powers.values = values
+    return powers
+
+
+def filter_line_power_imag(shared: list[str], powers: PowersImaginary, area: str = "") -> PowersImaginary:
+    if area != "":
+        area += "/"
+
+    ids = []
+    eqids = []
+    values = []
+    for id, eq, power in zip(powers.ids, powers.equipment_ids, powers.values):
+        name, phase = id.split(".", 1)
+        fr_bus, to_bus = name.split("_", 1)
+
+        if not (fr_bus in shared or to_bus in shared):
+            continue
+
+        branch = f"{area}{fr_bus}_{to_bus}.{phase}"
+        ids.append(f"{fr_bus}.{phase}")
+        eqids.append(branch)
+        values.append(power)
+
+        branch = f"{area}{to_bus}_{fr_bus}.{phase}"
+        ids.append(f"{to_bus}.{phase}")
+        eqids.append(branch)
+        values.append(-power)
+
+    powers.ids = ids
+    powers.equipment_ids = eqids
+    powers.values = values
+    return powers
+
+
+def filter_boundary_power_real(shared: list[str], powers: PowersReal) -> PowersReal:
+    ids = []
+    eqids = []
+    values = []
+    for id, eq, power in zip(powers.ids, powers.equipment_ids, powers.values):
+        name, phase = id.split(".", 1)
+
+        if name in shared:
+            ids.append(id)
+            eqids.append(eq)
+            values.append(power)
+
+    powers.ids = ids
+    powers.equipment_ids = eqids
+    powers.values = values
+    return powers
+
+
+def filter_boundary_power_imag(shared: list[str], powers: PowersImaginary) -> PowersImaginary:
+    ids = []
+    eqids = []
+    values = []
+    for id, eq, power in zip(powers.ids, powers.equipment_ids, powers.values):
+        name, phase = id.split(".", 1)
+
+        if name in shared:
+            ids.append(id)
+            eqids.append(eq)
+            values.append(power)
+
+    powers.ids = ids
+    powers.equipment_ids = eqids
+    powers.values = values
+    return powers
+
+
+def extract_powers_real(bus_info: BusInfo, real: PowersReal, replace: bool = False) -> BusInfo:
+    for id, eq, power in zip(real.ids, real.equipment_ids, real.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in bus_info.buses:
+            continue
+
+        if replace:
+            bus_info.buses[name].pq[phase][0] = power * 1000
+        else:
+            bus_info.buses[name].pq[phase][0] += power * 1000
+    return bus_info
+
+
+def extract_powers_imag(bus_info: BusInfo, imag: PowersImaginary, replace: bool = False) -> BusInfo:
+    for id, eq, power in zip(imag.ids, imag.equipment_ids, imag.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in bus_info.buses:
+            continue
+
+        if replace:
+            bus_info.buses[name].pq[phase][1] = power * 1000
+        else:
+            bus_info.buses[name].pq[phase][1] += power * 1000
+    return bus_info
+
+
+def extract_base_injection(bus_info: BusInfo, powers: Injection) -> dict:
+    real = powers.power_real
+    imag = powers.power_imaginary
+
+    for id, eq, power in zip(real.ids, real.equipment_ids, real.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in bus_info.buses:
+            continue
+
+        bus_info.buses[name].tags.append(eq)
+        if "PVSystem" in eq:
+            bus_info.buses[name].base_pv[phase][0] += power * 1000
+        else:
+            bus_info.buses[name].base_pq[phase][0] -= power * 1000
+
+    for id, eq, power in zip(imag.ids, imag.equipment_ids, imag.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in bus_info.buses:
+            continue
+
+        if "PVSystem" in eq:
+            bus_info.buses[name].base_pv[phase][1] += power * 1000
+        else:
+            bus_info.buses[name].base_pq[phase][1] -= power * 1000
+    return bus_info
+
+
+def extract_transformers(incidences: Incidence) -> (list[str], list[str]):
+    xfmrs = []
+    to_eq = incidences.to_equipment
+    fr_eq = incidences.from_equipment
+    ids = incidences.ids
+    for fr_eq, to_eq, eq_id in zip(fr_eq, to_eq, ids):
+        if "tr" in eq_id or "reg" in eq_id or "xfm" in eq_id:
+            if "." in to_eq:
+                [to_eq, _] = to_eq.split(".", 1)
+            if "." in fr_eq:
+                [fr_eq, _] = fr_eq.split(".", 1)
+            xfmrs.append(f"{fr_eq}_{to_eq}")
+    return xfmrs
+
+
+def generate_graph(inc: Incidence, slack_bus: str) -> nx.Graph:
+    graph = nx.Graph()
+    for src, dst, id in zip(inc.from_equipment, inc.to_equipment, inc.ids):
+        if "OPEN" in src or "OPEN" in dst:
+            continue
+        if src == dst:
+            continue
+
+        ps = pd = ""
+        if "." in src:
+            src, ps = src.split(".", 1)
+        if "." in dst:
+            dst, pd = dst.split(".", 1)
+
+        eq = "LINE"
+        if ("sw" in id or "fuse" in id) and "padswitch" not in id:
+            eq = "SWITCH"
+        if "tr" in id or "reg" in id or "xfm" in id:
+            eq = "XFMR"
+        graph.add_edge(src, dst, name=f"{src}_{dst}", tag=eq, id=f"{id}")
+
+    for c in nx.connected_components(graph):
+        if slack_bus in c:
+            return graph.subgraph(c).copy()
+
+
+def tag_regulators(branch_info: BranchInfo, bus_info: BusInfo) -> BranchInfo:
+    for k, branch in branch_info.branches.items():
+        if "XFMR" != branch.tag:
+            continue
+
+        src = bus_info.buses[branch.fr_bus]
+        dst = bus_info.buses[branch.to_bus]
+
+        if round(src.base_kv, 3) == round(dst.base_kv, 3):
+            branch.tag == "REG"
+    return branch_info
+
+
+def direct_branch_flows(
+    graph: nx.Graph, branch_info: BranchInfo, source: str
+) -> BranchInfo:
+    dist = nx.single_source_shortest_path(graph, source)
+
+    for k, branch in branch_info.branches.items():
+        fr_idx = branch.fr_idx
+        to_idx = branch.to_idx
+        fr_bus = branch.fr_bus
+        to_bus = branch.to_bus
+        src = dist[fr_bus]
+        dst = dist[to_bus]
+
+        if src > dst:
+            branch_info.branches[k].fr_idx = to_idx
+            branch_info.branches[k].to_idx = fr_idx
+            branch_info.branches[k].fr_bus = to_bus
+            branch_info.branches[k].to_bus = fr_bus
+    return branch_info
+
+
+def disconnect_areas(graph: nx.Graph, switches) -> list[nx.Graph]:
+    graph.remove_edges_from(switches)
+
+    areas = []
+    for c in nx.connected_components(graph):
+        areas.append(graph.subgraph(c).copy())
+    return areas
+
+
+def get_edge_name(graph: nx.Graph, src: str):
+    for u, v, a in graph.edges(data=True):
+        if u == src or v == src:
+            return a['name']
+    return ""
+
+
+def get_switches(graph: nx.Graph):
+    switches = []
+    for u, v, a in graph.edges(data=True):
+        if "SWITCH" == a["tag"]:
+            switches.append((u, v, a))
+    return switches
+
+
+def area_disconnects(graph: nx.Graph):
+    n_max = 5
+    switches = get_switches(graph)
+    areas = disconnect_areas(graph, switches)
+    area_cnt = [area.number_of_nodes() for area in areas]
+    min_n = [area.number_of_nodes() for area in areas]
+    min_n.sort(reverse=True)
+    min_n = min(min_n[0:n_max])
+    z_area = zip(area_cnt, areas)
+    z_area = sorted(z_area, key=lambda v: v[0])
+
+    closed = []
+    cnt = 0
+    for n, area in z_area:
+        if n < 2 or n < min_n or cnt > n_max:
+            for u, v, a in switches:
+                if area.has_node(u) or area.has_node(v):
+                    closed.append((u, v, a))
+            continue
+        cnt += 1
+
+    open = [(u, v, a) for u, v, a in switches if (u, v, a) not in closed]
+    return open
+
+
+def reconnect_area_switches(areas: list[nx.Graph], switches):
+    for area in areas:
+        for u, v, a in switches:
+            if area.has_node(u) or area.has_node(v):
+                area.add_edge(u, v, **a)
+    return areas
+
+
+def get_area_source(graph: nx.Graph, slack_bus: str, switches):
+    paths = {}
+    for u, v, a in switches:
+        paths[len(nx.shortest_path(graph, slack_bus, u))] = (u, v, a)
+    source = min(paths, key=paths.get)
+    return paths[source]
+
+
+def extract_injection(bus_info: BusInfo, powers: Injection) -> dict:
+    real = powers.power_real
+    imag = powers.power_imaginary
+
+    for id, eq, power in zip(real.ids, real.equipment_ids, real.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in bus_info.buses:
+            continue
+
+        bus_info.buses[name].tags.append(eq)
+        if "PVSystem" in eq:
+            bus_info.buses[name].pv[phase][0] += power * 1000
+        else:
+            bus_info.buses[name].pq[phase][0] -= power * 1000
+
+    for id, eq, power in zip(imag.ids, imag.equipment_ids, imag.values):
+        name, phase = id.split(".", 1)
+        phase = int(phase) - 1
+
+        if name not in bus_info.buses:
+            continue
+
+        if "PVSystem" in eq:
+            bus_info.buses[name].pv[phase][1] += power * 1000
+        else:
+            bus_info.buses[name].pq[phase][1] -= power * 1000
+    return bus_info
+
+
+def extract_admittance(branch_info: BranchInfo, y: AdmittanceSparse) -> BranchInfo:
+    for src, dst, v in zip(y.from_equipment, y.to_equipment, y.admittance_list):
+        src, row = src.split(".", 1)
+        row = int(row) - 1
+        dst, col = dst.split(".", 1)
+        col = int(col) - 1
+
+        if src == dst:
+            continue
+
+        key = f"{src}_{dst}"
+        rev_key = f"{dst}_{src}"
+        if key in branch_info.branches:
+            branch_info.branches[key].y[row][col] = complex(v[0], v[1])
+            branch_info.branches[key].phases[row] = row + 1
+            branch_info.branches[key].phases[col] = col + 1
+        elif rev_key in branch_info.branches:
+            branch_info.branches[rev_key].y[col][row] = complex(v[0], v[1])
+            branch_info.branches[rev_key].phases[row] = row + 1
+            branch_info.branches[rev_key].phases[col] = col + 1
+    return branch_info
+
+
+def find_primary(graph: nx.DiGraph, bus_info: BusInfo, node: int) -> str:
+    while list(graph.predecessors(node)):
+        primary = next(graph.predecessors(node))
+        if bus_info.buses[primary].base_kv > 0.5:
+            return primary
+        node = primary
+    return None
+
+
+def get_upstream(branch_info: BranchInfo, node: str) -> str:
+    for k, branch in branch_info.branches.items():
+        if branch.to_bus == node:
+            return branch.fr_bus
+
+
+def find_branch(branch_info: BranchInfo, src: str, dst: str) -> str:
+    for k, branch in branch_info.branches.items():
+        if branch.fr_bus == src and branch.to_bus == dst:
+            return k
+
+
+def find_consecutive_phase(connected: list[list[bool]]) -> int:
+    connected_row = []
+    connected_col = []
+    for i in range(3):
+        consecutive = 0
+        for j in range(3):
+            if connected[i][j]:
+                consecutive += 1
+            else:
+                consecutive = 0
+
+            if consecutive >= 2:
+                connected_row.append(i)
+
+    for j in range(3):
+        consecutive = 0
+        for i in range(3):
+            if connected[i][j]:
+                consecutive += 1
+            else:
+                consecutive = 0
+
+            if consecutive >= 2:
+                connected_col.append(j)
+
+    if connected_col and connected_row:
+        raise Exception("hase phase in both row and col of xfmr")
+
+    if connected_row:
+        return connected_row[0]
+
+    if connected_col:
+        return connected_col[0]
+
+
+def find_connected_phases(zprim: list[list[list[float]]]) -> list[list[bool]]:
+    connected = np.zeros((3, 3), dtype=bool).tolist()
+    for i in range(3):
+        for j in range(3):
+            real = abs(zprim[i][j][0])
+            imag = abs(zprim[i][j][1])
+            if real > 1e-6 or imag > 1e-6:
+                connected[i][j] = True
+
+    return connected
+
+
+def traverse_secondaries(
+    branch_info: BranchInfo, bus_info: BusInfo, node: str, primary: str
+) -> list[int]:
+    secondaries = [node]
+    while node != primary:
+        node = get_upstream(branch_info, node)
+        secondaries.append(node)
+
+    for k, branch in branch_info.branches.items():
+        # make sure first low side of the secondaries isn't in branch
+        if branch.fr_bus == primary and branch.to_bus == secondaries[-2]:
+            zprim = branch.zprim
+            break
+
+    connected_phases = find_connected_phases(zprim)
+    connected_phase = find_consecutive_phase(connected_phases)
+
+    if "processed" in branch.tag:
+        phases = branch.phases
+    else:
+        phases = [0] * 3
+        phases[connected_phase] = connected_phase + 1
+
+    for i, secondary in enumerate(secondaries):
+        if i == len(secondaries) - 1:
+            continue
+
+        branch = find_branch(branch_info, secondaries[i + 1], secondary)
+        if "processed" in branch_info.branches[branch].tag:
+            continue
+
+        branch_info.branches[branch].phases = phases
+        est_zprim = np.zeros((3, 3, 2)).tolist()
+        est_zprim[connected_phase][connected_phase] = [1e-5, 1e-5]
+        branch_info.branches[branch].zprim = est_zprim
+        branch_info.branches[branch].tag += ".processed"
+
+        bus_info.buses[secondary].phases = phases
+        if secondaries[i + 1] != primary:
+            bus_info.buses[secondaries[i + 1]].phases = phases
+
+    return connected_phase
+
+
+def process_secondary(
+    branch_info: BranchInfo, bus_info: BusInfo, node: str, primary: str
+) -> (BranchInfo, BusInfo):
+    bus = bus_info.buses[node]
+    has_phase = [p != 0 for p in bus.phases]
+
+    if all(has_phase):
+        return (branch_info, bus_info)
+
+    primary_phase = traverse_secondaries(branch_info, bus_info, node, primary)
+
+    new_pq = np.zeros((3, 2)).tolist()
+    new_pv = np.zeros((3, 2)).tolist()
+    for pq, pv in zip(bus.pq, bus.pq):
+        for ppq, ppv in zip(pq, pv):
+            new_pq[primary_phase] += [ppq]
+            new_pv[primary_phase] += [ppv]
+
+    bus_info.buses[node].pq = new_pq
+    bus_info.buses[node].pv = new_pv
+
+    return (branch_info, bus_info)
+
+
+def map_secondaries(
+    branch_info: BranchInfo, bus_info: BusInfo
+) -> (BranchInfo, BusInfo):
+    graph = nx.DiGraph()
+    branch: Branch
+    for branch in branch_info.branches.values():
+        graph.add_edge(branch.fr_bus, branch.to_bus)
+
+    secondaries = [
+        b
+        for b in bus_info.buses.keys()
+        if graph.out_degree(b) == 0 and bus_info.buses[b].base_kv < 0.5
+    ]
+
+    # Process each leaf node
+    bus_data = {k: asdict(v) for k, v in bus_info.buses.items()}
+    branch_data = {k: asdict(v) for k, v in branch_info.branches.items()}
+    for secondary in secondaries:
+        primary_parent = find_primary_parent(secondary, bus_data, graph)
+
+        if primary_parent:
+            process_secondary_side(
+                secondary, primary_parent, bus_data, branch_data)
+
+    bus_info.buses = {k: Bus(**v) for k, v in bus_data.items()}
+    for k in branch_data.keys():
+        if "processed" in branch_data[k]:
+            del branch_data[k]["processed"]
+    branch_info.branches = {k: Branch(**v) for k, v in branch_data.items()}
+
+    return (branch_info, bus_info)
+
+
+def generate_area_info(graph: nx.Graph, topology: Topology, slack_bus: str, boundary: list[str]) -> (BranchInfo, BusInfo):
+    switches = []
+    for u, v, a in graph.edges(data=True):
+        if a["id"] in boundary:
+            switches.append(a["id"])
+
+    if sorted(switches) != sorted(boundary):
+        return None, None
+
+    branch_info = BranchInfo()
+    bus_info = BusInfo()
+
+    for u, v, a in graph.edges(data=True):
+        branch_info.branches[a["name"]] = Branch(
+            fr_bus=u, to_bus=v, tag=a["tag"])
+        bus_info.buses[u] = Bus()
+        bus_info.buses[v] = Bus()
+
+    branch_info = direct_branch_flows(graph, branch_info, slack_bus)
+    branch_info = extract_admittance(branch_info, topology.admittance)
+    branch_info = generate_zprim(branch_info)
+    bus_info = extract_base_voltages(
+        bus_info, topology.base_voltage_magnitudes)
+    bus_info = extract_base_injection(bus_info, topology.injections)
+    branch_info = tag_regulators(branch_info, bus_info)
+    branch_info, bus_info = index_info(branch_info, bus_info)
+
+    return (branch_info, bus_info)
+
+
+def extract_info(topology: Topology) -> (BranchInfo, BusInfo, str):
+    branch_info = BranchInfo()
+    bus_info = BusInfo()
+    slack_bus, _ = topology.slack_bus[0].split(".", 1)
+    graph = generate_graph(topology.incidences, slack_bus)
+
+    for u, v, a in graph.edges(data=True):
+        branch_info.branches[a["name"]] = Branch(
+            fr_bus=u, to_bus=v, tag=a["tag"])
+        bus_info.buses[u] = Bus()
+        bus_info.buses[v] = Bus()
+
+    branch_info = direct_branch_flows(graph, branch_info, slack_bus)
+    branch_info = extract_admittance(branch_info, topology.admittance)
+    branch_info = generate_zprim(branch_info)
+    bus_info = extract_base_voltages(
+        bus_info, topology.base_voltage_magnitudes)
+    bus_info = extract_base_injection(bus_info, topology.injections)
+    branch_info = tag_regulators(branch_info, bus_info)
+    branch_info, bus_info = index_info(branch_info, bus_info)
+
+    return (branch_info, bus_info, slack_bus)
+
+
+def find_consecutive_true(matrix):
+    connected_phase_row = []
+    connected_phase_col = []
+
+    # Check rows for consecutive True values
+    for i, row in enumerate(matrix):
+        consecutive = 0
+        for j in range(len(row)):
+            if row[j]:
+                consecutive += 1
+            else:
+                consecutive = 0
+            if consecutive >= 2:
+                connected_phase_row.append(i)
+                # print(f"Consecutive True found in row {i} starting at column {j - 1}")
+
+    # Check columns for consecutive True values
+    for j in range(len(matrix[0])):
+        consecutive = 0
+        for i in range(len(matrix)):
+            if matrix[i][j]:
+                consecutive += 1
+            else:
+                consecutive = 0
+            if consecutive >= 2:
+                connected_phase_col.append(j)
+                # print(f"Consecutive True found in column {j} starting at row {i - 1}")
+
+    if connected_phase_row and connected_phase_col:
+        raise Exception("has both row and col value in xfmr.")
+
+    con_ph = None
+    if connected_phase_row:
+        con_ph = connected_phase_row[0]
+    elif connected_phase_col:
+        con_ph = connected_phase_col[0]
+
+    return con_ph
+
+
+def find_connected_phase(zprim, threshold):
+    # Create a 3x3 boolean matrix
+    bool_matrix = []
+
+    for row in zprim:
+        bool_row = []
+        for element in row:
+            # Check if any part of the complex value (real or imaginary) is greater than the threshold
+            if abs(element[0]) > threshold or abs(element[1]) > threshold:
+                bool_row.append(True)
+            else:
+                bool_row.append(False)
+        bool_matrix.append(bool_row)
+
+    # Find consecutive True values in rows and columns
+    _connected_phase = find_consecutive_true(bool_matrix)
+
+    return _connected_phase
+
+
+def find_immediate_parent_node(branch_data, current_bus: str):
+    for branch_id, branch in branch_data.items():
+        if branch["to_bus"] == str(current_bus):
+            immediate_parent_bus = branch["fr_bus"]
+
+    return immediate_parent_bus
+
+
+def find_branch_key(branch_data, fr_bus, to_bus):
+    for branch_id, branch in branch_data.items():
+        if branch["fr_bus"] == str(fr_bus) and branch["to_bus"] == str(to_bus):
+            branch_key = branch_id
+            break
+        else:
+            branch_key = []
+    return branch_key
+
+
+def correct_secondary_network(branch_data, bus_data, target_bus, leaf_bus):
+    # Find parent node of secondary bus:
+    leaf_parent_walk = [leaf_bus]
+    current_bus = leaf_bus
+    im_parent = current_bus
+    while im_parent != target_bus:
+        im_parent = find_immediate_parent_node(branch_data, current_bus)
+        leaf_parent_walk.append(im_parent)
+        current_bus = im_parent
+
+    # Iterate through the branches
+    for branch_id, branch in branch_data.items():
+        if (
+            branch["fr_bus"] == str(target_bus)
+            and branch["to_bus"] == leaf_parent_walk[-2]
+        ):
+            zprim = branch.get("zprim", None)
+            break
+
+    connected_phase_temp = find_connected_phase(zprim, threshold=1e-6)
+
+    if "processed" in branch:
+        connected_phase = [i - 1 for i in branch["phases"] if i != 0][0]
+    else:
+        connected_phase = connected_phase_temp
+
+    # Correct branch and bus phase till the secondary side of the xfmr
+    correct_xfmr_phases = [0, 0, 0]
+    correct_xfmr_phases[connected_phase] = int(connected_phase) + 1
+
+    for walk in range(len(leaf_parent_walk) - 1):
+        current_br = find_branch_key(
+            branch_data, leaf_parent_walk[1 + walk], leaf_parent_walk[0 + walk]
+        )
+        if "processed" in branch_data[current_br]:
+            pass
+        else:
+            branch_data[current_br]["phases"] = correct_xfmr_phases
+
+            corrected_zprim = list([[[0, 0], [0, 0], [0, 0]] for a in zprim])
+            corrected_zprim[connected_phase][connected_phase] = [
+                1e-5,
+                1e-5,
+            ]  # estimating secondary Zimpedances as a low value
+            branch_data[current_br]["zprim"] = corrected_zprim
+            branch_data[current_br]["processed"] = True
+
+        bus_data[leaf_parent_walk[0 + walk]]["phases"] = correct_xfmr_phases
+        if leaf_parent_walk[1 + walk] != target_bus:
+            bus_data[leaf_parent_walk[1 + walk]
+                     ]["phases"] = correct_xfmr_phases
+
+    ####
+
+    return connected_phase
+
+
+# Function to find the first high voltage parent node
+
+
+def find_primary_parent(leaf_bus, bus_data, G):
+    current_bus = leaf_bus
+    while list(G.predecessors(current_bus)):
+        parent = next(G.predecessors(current_bus))
+        if bus_data[parent]["base_kv"] > 0.5:
+            return parent
+        current_bus = parent
+    return None
+
+
+# Function to update PQ values to the same phase
+
+
+def process_secondary_side(leaf_bus, parent_bus, bus_data, branch_data):
+    leaf_pq = bus_data[leaf_bus]["pq"]
+    leaf_pv = bus_data[leaf_bus]["pv"]
+    # parent_NZ_phase_idx = [idx for idx, val in enumerate(parent_phases) if val != 0]
+
+    leaf_phases = bus_data[leaf_bus]["phases"]
+    leaf_phase_bool = [p != 0 for p in leaf_phases]
+
+    if sum(leaf_phase_bool) == 3:
+        pass
+    else:
+        parent_phases = correct_secondary_network(
+            branch_data, bus_data, parent_bus, leaf_bus
+        )
+
+        # Assign all PQ of the leaf node to the corresponding phases of the parent node
+        # Create an empty PQ for three phases
+        new_pq = [[0.0, 0.0] for _ in range(3)]
+        new_pv = [[0.0, 0.0] for _ in range(3)]
+
+        leaf_pq_sum = [0, 0]
+        leaf_pv_sum = [0, 0]
+        for i, phase in enumerate(leaf_phases):
+            leaf_pq_sum = [x + y for x, y in zip(leaf_pq[i], leaf_pq_sum)]
+            leaf_pv_sum = [x + y for x, y in zip(leaf_pv[i], leaf_pv_sum)]
+
+        new_pq[parent_phases] = leaf_pq_sum
+        new_pv[parent_phases] = leaf_pv_sum
+
+        # Update the leaf node's PQ
+        bus_data[leaf_bus]["pq"] = new_pq
+        bus_data[leaf_bus]["pv"] = new_pv
+
+    # Function to update the direction of the branch based on distance from root
+
+
+def branch_distance(branch_data: BranchInfo, root: str):
+    G = nx.Graph()
+
+    branch: Branch
+    for branch_id, branch in branch_data.items():
+        G.add_edge(branch.fr_bus, branch.to_bus)
+
+    distances_from_root = nx.single_source_shortest_path_length(
+        G, root)
+    return distances_from_root
+
+
+def update_branch_direction_based_on_root(
+    branch_data, root_node="P1UDT942-P1UHS0_1247X"
+):
+    G = nx.Graph()
+
+    for branch_id, branch in branch_data.items():
+        from_bus = branch["fr_bus"]
+        to_bus = branch["to_bus"]
+        G.add_edge(from_bus, to_bus)
+
+    # Use BFS to calculate the shortest path from the root to all nodes
+    distances_from_root = nx.single_source_shortest_path_length(G, root_node)
+
+    for branch_id, branch in branch_data.items():
+        from_bus = branch["fr_bus"]
+        to_bus = branch["to_bus"]
+        from_idx = branch["fr_idx"]
+        to_idx = branch["to_idx"]
+
+        # Get distances of from_bus and to_bus from the root node
+        from_distance = distances_from_root[from_bus]
+        to_distance = distances_from_root[to_bus]
+
+        # If the from_bus is farther from the root than to_bus, swap them
+        if from_distance > to_distance:
+            # Swap the buses
+            branch_data[branch_id]["fr_bus"] = to_bus
+            branch_data[branch_id]["to_bus"] = from_bus
+            branch_data[branch_id]["fr_idx"] = to_idx
+            branch_data[branch_id]["to_idx"] = from_idx
+            print(f"Swapped {branch_id}: now from={to_bus} to={from_bus}")
+        else:
+            print(f"Kept {branch_id}: from {from_bus} to {to_bus} (no change)")
