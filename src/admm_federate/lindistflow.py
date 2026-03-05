@@ -1,12 +1,13 @@
-from enum import Enum
-import numpy as np
-import cvxpy as cp
-import math
-import logging
 import copy
 import json
+import logging
+import math
 from dataclasses import asdict
-from adapter import BranchInfo, Branch, BusInfo, Bus, branch_distance
+from enum import Enum
+
+import cvxpy as cp
+import numpy as np
+from adapter import Branch, BranchInfo, Bus, BusInfo, branch_distance
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -62,15 +63,14 @@ def convert_pu(
 
     for k, v in bus_info.buses.items():
         bus_pu.buses[k].pq = [[pq * pq_pu for pq in phase] for phase in v.pq]
-        bus_pu.buses[k].base_pq = [[pq * pq_pu for pq in phase]
-                                   for phase in v.base_pq]
+        bus_pu.buses[k].base_pq = [[pq * pq_pu for pq in phase] for phase in v.base_pq]
         bus_pu.buses[k].pv = [[pq * pq_pu for pq in phase] for phase in v.pv]
         bus_pu.buses[k].base_pv = [
             [pq * kw_to_va * pq_pu for pq in phase] for phase in v.base_pv
         ]
 
     if branch_info is None:
-        return (branch_info, bus_pu, 1/pq_pu/1000)
+        return (branch_info, bus_pu, 1 / pq_pu / 1000)
 
     for k, v in branch_pu.branches.items():
         if (
@@ -144,8 +144,7 @@ def voltage_cons_sec(
     A[counteq, frm] = 1
     A[counteq, to] = -1
     n_flow_s1s2 = (
-        (nbus_ABC * 3 + nbus_s1s2) +
-        (nbus_ABC * 6 + nbus_s1s2 * 2) + nbranch_ABC * 6
+        (nbus_ABC * 3 + nbus_s1s2) + (nbus_ABC * 6 + nbus_s1s2 * 2) + nbranch_ABC * 6
     )
     # real power drop
     A[counteq, p + n_flow_s1s2] = p_pri + 0.5 * p_sec
@@ -183,17 +182,31 @@ class ADMMConfig:
     rho_vdn: float
 
 
-def solve(branch_info: dict, bus_info: dict, child_info: BusInfo, parent_info: BusInfo, config: ADMMConfig):
+def solve(
+    branch_info: dict,
+    bus_info: dict,
+    child_info: BusInfo,
+    parent_info: BusInfo,
+    config: ADMMConfig,
+):
     try:
-        return optimal_power_flow(branch_info, bus_info, child_info, parent_info, config)
+        return optimal_power_flow(
+            branch_info, bus_info, child_info, parent_info, config
+        )
 
     except:
         config.relaxed = True
-        return optimal_power_flow(branch_info, bus_info, child_info, parent_info, config)
+        return optimal_power_flow(
+            branch_info, bus_info, child_info, parent_info, config
+        )
 
 
 def optimal_power_flow(
-    branch_info: BranchInfo, bus_info: BusInfo, child_info: BusInfo, parent_info: BusInfo, config: ADMMConfig
+    branch_info: BranchInfo,
+    bus_info: BusInfo,
+    child_info: BusInfo,
+    parent_info: BusInfo,
+    config: ADMMConfig,
 ):
     # System's base definition
     BASE_S = 1  # MVA
@@ -246,7 +259,7 @@ def optimal_power_flow(
     local_variable_number = (
         voltage_count + injection_count + flow_count + pdg_count + qdg_count
     )
-    flex_node_count = nbus_ABC*6 + nbus_s1s2*2
+    flex_node_count = nbus_ABC * 6 + nbus_s1s2 * 2
     variable_number = local_variable_number + flex_node_count
 
     # Number of equality/inequality constraints (Injection equations (ABC) at each bus)
@@ -256,19 +269,28 @@ def optimal_power_flow(
 
     constraint_number = 1000 + variable_number + n_bus + 3 * n_bus + n_branch
     # A_ineq = np.zeros((constraint_number, variable_number))
-    A_ineq = np.memmap('Aineq.dat', dtype='float32', mode='w+',
-                       shape=(constraint_number, variable_number))
+    A_ineq = np.memmap(
+        "Aineq.dat",
+        dtype="float32",
+        mode="w+",
+        shape=(constraint_number, variable_number),
+    )
     b_ineq = np.zeros(constraint_number)
 
     x = cp.Variable(variable_number)
     # Initialize the matrices
     # P = np.zeros((variable_number, variable_number))
-    P = np.memmap('P.dat', dtype='float32', mode='w+',
-                  shape=(variable_number, variable_number))
+    P = np.memmap(
+        "P.dat", dtype="float32", mode="w+", shape=(variable_number, variable_number)
+    )
     q_obj_vector = np.zeros(variable_number)
     # A_eq = np.zeros((constraint_number, variable_number))
-    A_eq = np.memmap('Aeq.dat', dtype='float32', mode='w+',
-                     shape=(constraint_number, variable_number))
+    A_eq = np.memmap(
+        "Aeq.dat",
+        dtype="float32",
+        mode="w+",
+        shape=(constraint_number, variable_number),
+    )
     b_eq = np.zeros(constraint_number)
 
     # Some extra variable definition for clean code:
@@ -310,32 +332,41 @@ def optimal_power_flow(
     parent = parent_pu.buses[config.source_bus]
     vsrc = parent.kvs
     if all([v == 0.0 for v in vsrc]):
-        vsrc = [bus_pu.buses[config.source_bus].kv]*3
+        vsrc = [bus_pu.buses[config.source_bus].kv] * 3
     logger.debug(f"vup: {vsrc}")
     psrc = [pq[0] for pq in parent.pq]
     qsrc = [pq[1] for pq in parent.pq]
 
     source_line_idx = branch_info.branches[config.source_line].idx
     source_bus_idx = bus_info.buses[slack_bus].idx
-    obj_Pup += 0.5 * rho_Sup * ((x[flow_var_start_idx + source_line_idx + nbranch_ABC * 0] - psrc[0]) ** 2
-                                + (x[flow_var_start_idx + source_line_idx +
-                                   nbranch_ABC * 1] - psrc[1]) ** 2
-                                + (x[flow_var_start_idx + source_line_idx +
-                                   nbranch_ABC * 2] - psrc[2]) ** 2
-                                )
-    obj_Qup += 0.5 * rho_Sup * ((x[flow_var_start_idx + source_line_idx + nbranch_ABC * 3] - qsrc[0]) ** 2
-                                + (x[flow_var_start_idx + source_line_idx +
-                                   nbranch_ABC * 4] - qsrc[1]) ** 2
-                                + (x[flow_var_start_idx + source_line_idx +
-                                   nbranch_ABC * 5] - qsrc[2]) ** 2
-                                )
+    obj_Pup += (
+        0.5
+        * rho_Sup
+        * (
+            (x[flow_var_start_idx + source_line_idx + nbranch_ABC * 0] - psrc[0]) ** 2
+            + (x[flow_var_start_idx + source_line_idx + nbranch_ABC * 1] - psrc[1]) ** 2
+            + (x[flow_var_start_idx + source_line_idx + nbranch_ABC * 2] - psrc[2]) ** 2
+        )
+    )
+    obj_Qup += (
+        0.5
+        * rho_Sup
+        * (
+            (x[flow_var_start_idx + source_line_idx + nbranch_ABC * 3] - qsrc[0]) ** 2
+            + (x[flow_var_start_idx + source_line_idx + nbranch_ABC * 4] - qsrc[1]) ** 2
+            + (x[flow_var_start_idx + source_line_idx + nbranch_ABC * 5] - qsrc[2]) ** 2
+        )
+    )
 
-    obj_Vup += 0.5 * rho_Vup * ((x[source_bus_idx + nbus_ABC * 0] - vsrc[0] ** 2) ** 2
-                                + (x[source_bus_idx + nbus_ABC * 1] -
-                                   vsrc[1] ** 2) ** 2
-                                + (x[source_bus_idx + nbus_ABC * 2] -
-                                   vsrc[2] ** 2) ** 2
-                                )
+    obj_Vup += (
+        0.5
+        * rho_Vup
+        * (
+            (x[source_bus_idx + nbus_ABC * 0] - vsrc[0] ** 2) ** 2
+            + (x[source_bus_idx + nbus_ABC * 1] - vsrc[1] ** 2) ** 2
+            + (x[source_bus_idx + nbus_ABC * 2] - vsrc[2] ** 2) ** 2
+        )
+    )
     # ADMM Downstream
     rho_Sdn = config.rho_sdn
     rho_Vdn = config.rho_vdn
@@ -349,20 +380,36 @@ def optimal_power_flow(
         pdn = [pq[0] for pq in child.pq]
         qdn = [pq[1] for pq in child.pq]
 
-        obj_Vdn += 0.5 * rho_Vdn * (
-            (x[child_bus_idx + nbus_ABC * 0] - vdn[0] ** 2) ** 2
-            + (x[child_bus_idx + nbus_ABC * 1] - vdn[1] ** 2) ** 2
-            + (x[child_bus_idx + nbus_ABC * 2] - vdn[2] ** 2) ** 2
+        obj_Vdn += (
+            0.5
+            * rho_Vdn
+            * (
+                (x[child_bus_idx + nbus_ABC * 0] - vdn[0] ** 2) ** 2
+                + (x[child_bus_idx + nbus_ABC * 1] - vdn[1] ** 2) ** 2
+                + (x[child_bus_idx + nbus_ABC * 2] - vdn[2] ** 2) ** 2
+            )
         )
-        obj_Pdn += 0.5 * rho_Sdn * (
-            (x[local_variable_number + child_bus_idx + nbus_ABC * 0] - pdn[0]) ** 2
-            + (x[local_variable_number + child_bus_idx + nbus_ABC * 1] - pdn[1]) ** 2
-            + (x[local_variable_number + child_bus_idx + nbus_ABC * 2] - pdn[2]) ** 2
+        obj_Pdn += (
+            0.5
+            * rho_Sdn
+            * (
+                (x[local_variable_number + child_bus_idx + nbus_ABC * 0] - pdn[0]) ** 2
+                + (x[local_variable_number + child_bus_idx + nbus_ABC * 1] - pdn[1])
+                ** 2
+                + (x[local_variable_number + child_bus_idx + nbus_ABC * 2] - pdn[2])
+                ** 2
+            )
         )
-        obj_Qdn += 0.5 * rho_Sdn * (
-            (x[local_variable_number + child_bus_idx + nbus_ABC * 3] - qdn[0]) ** 2
-            + (x[local_variable_number + child_bus_idx + nbus_ABC * 4] - qdn[1]) ** 2
-            + (x[local_variable_number + child_bus_idx + nbus_ABC * 5] - qdn[2]) ** 2
+        obj_Qdn += (
+            0.5
+            * rho_Sdn
+            * (
+                (x[local_variable_number + child_bus_idx + nbus_ABC * 3] - qdn[0]) ** 2
+                + (x[local_variable_number + child_bus_idx + nbus_ABC * 4] - qdn[1])
+                ** 2
+                + (x[local_variable_number + child_bus_idx + nbus_ABC * 5] - qdn[2])
+                ** 2
+            )
         )
     # lossMin obj:
     obj_loss = 0
@@ -371,7 +418,8 @@ def optimal_power_flow(
     #         flow_var_start_idx + line_k + nbranch_ABC * 4] + x[flow_var_start_idx + line_k + nbranch_ABC * 4]
 
     admm_penalty_term = cp.sum(
-        obj_loss + obj_Vup + obj_Pup + obj_Qup + obj_Vdn + obj_Pdn + obj_Qdn)
+        obj_loss + obj_Vup + obj_Pup + obj_Qup + obj_Vdn + obj_Pdn + obj_Qdn
+    )
 
     counteq = 0
     for keyb, val_bus in buses.items():
@@ -423,20 +471,17 @@ def optimal_power_flow(
                         k_frm_3p.append(ind_frm)
                     else:
                         if val_br.phases[0] != 0:
-                            k_frm_1pa.append(
-                                nbranch_ABC * 6 + ind_frm - nbranch_ABC)
+                            k_frm_1pa.append(nbranch_ABC * 6 + ind_frm - nbranch_ABC)
                             k_frm_1qa.append(
                                 nbranch_ABC * 3 + ind_frm - nbranch_ABC + nbranch_s1s2
                             )
                         if val_br.phases[1] != 0:
-                            k_frm_1pb.append(
-                                nbranch_ABC * 5 + ind_frm - nbranch_ABC)
+                            k_frm_1pb.append(nbranch_ABC * 5 + ind_frm - nbranch_ABC)
                             k_frm_1qb.append(
                                 nbranch_ABC * 2 + ind_frm - nbranch_ABC + nbranch_s1s2
                             )
                         if val_br.phases[2] != 0:
-                            k_frm_1pc.append(
-                                nbranch_ABC * 4 + ind_frm - nbranch_ABC)
+                            k_frm_1pc.append(nbranch_ABC * 4 + ind_frm - nbranch_ABC)
                             k_frm_1qc.append(
                                 nbranch_ABC * 1 + ind_frm - nbranch_ABC + nbranch_s1s2
                             )
@@ -743,67 +788,51 @@ def optimal_power_flow(
         if val_bus.base_kv > PRIMARY_V:
             # p_inj  + p_gen(control var) =  p_load
             # Phase A Real Power
-            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 +
-                 nbus_ABC * 0 + val_bus.idx] = 1
-            A_eq[counteq, state_variable_number +
-                 nbus_ABC * 0 + val_bus.idx] = 1
+            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 + nbus_ABC * 0 + val_bus.idx] = 1
+            A_eq[counteq, state_variable_number + nbus_ABC * 0 + val_bus.idx] = 1
             b_eq[counteq] = val_bus.pq[0][0] * BASE_S * mult
             counteq += 1
             # Phase B Real Power
-            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 +
-                 nbus_ABC * 1 + val_bus.idx] = 1
-            A_eq[counteq, state_variable_number +
-                 nbus_ABC * 1 + val_bus.idx] = 1
+            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 + nbus_ABC * 1 + val_bus.idx] = 1
+            A_eq[counteq, state_variable_number + nbus_ABC * 1 + val_bus.idx] = 1
             b_eq[counteq] = val_bus.pq[1][0] * BASE_S * mult
             counteq += 1
             # Phase C Real Power
-            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 +
-                 nbus_ABC * 2 + val_bus.idx] = 1
-            A_eq[counteq, state_variable_number +
-                 nbus_ABC * 2 + val_bus.idx] = 1
+            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 + nbus_ABC * 2 + val_bus.idx] = 1
+            A_eq[counteq, state_variable_number + nbus_ABC * 2 + val_bus.idx] = 1
             b_eq[counteq] = val_bus.pq[2][0] * BASE_S * mult
             counteq += 1
 
             # Q_inj  + Q_gen(control var) =  Q_load
             # Phase A Reactive power
-            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 +
-                 nbus_ABC * 3 + val_bus.idx] = 1
+            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 + nbus_ABC * 3 + val_bus.idx] = 1
             A_eq[counteq, n_Qdg + nbus_ABC * 0 + val_bus.idx] = 1
             b_eq[counteq] = val_bus.pq[0][1] * BASE_S * mult
             counteq += 1
             # Phase B Reactive power
-            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 +
-                 nbus_ABC * 4 + val_bus.idx] = 1
+            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 + nbus_ABC * 4 + val_bus.idx] = 1
             A_eq[counteq, n_Qdg + nbus_ABC * 1 + val_bus.idx] = 1
             b_eq[counteq] = val_bus.pq[1][1] * BASE_S * mult
             counteq += 1
             # Phase C Reactive power
-            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 +
-                 nbus_ABC * 5 + val_bus.idx] = 1
+            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 + nbus_ABC * 5 + val_bus.idx] = 1
             A_eq[counteq, n_Qdg + nbus_ABC * 2 + val_bus.idx] = 1
             b_eq[counteq] = val_bus.pq[2][1] * BASE_S * mult
             counteq += 1
 
             # DG upper limit set up:
-            DG_up_lim[nbus_ABC * 0 +
-                      val_bus.idx] = val_bus.base_pv[0][0] * BASE_S
-            DG_up_lim[nbus_ABC * 1 +
-                      val_bus.idx] = val_bus.base_pv[1][0] * BASE_S
-            DG_up_lim[nbus_ABC * 2 +
-                      val_bus.idx] = val_bus.base_pv[2][0] * BASE_S
+            DG_up_lim[nbus_ABC * 0 + val_bus.idx] = val_bus.base_pv[0][0] * BASE_S
+            DG_up_lim[nbus_ABC * 1 + val_bus.idx] = val_bus.base_pv[1][0] * BASE_S
+            DG_up_lim[nbus_ABC * 2 + val_bus.idx] = val_bus.base_pv[2][0] * BASE_S
 
             # DG active limit set up:
-            DG_active_up_lim[nbus_ABC * 0 +
-                             val_bus.idx] = val_bus.pv[0][0] * BASE_S
-            DG_active_up_lim[nbus_ABC * 1 +
-                             val_bus.idx] = val_bus.pv[1][0] * BASE_S
-            DG_active_up_lim[nbus_ABC * 2 +
-                             val_bus.idx] = val_bus.pv[2][0] * BASE_S
+            DG_active_up_lim[nbus_ABC * 0 + val_bus.idx] = val_bus.pv[0][0] * BASE_S
+            DG_active_up_lim[nbus_ABC * 1 + val_bus.idx] = val_bus.pv[1][0] * BASE_S
+            DG_active_up_lim[nbus_ABC * 2 + val_bus.idx] = val_bus.pv[2][0] * BASE_S
 
         # work on this for the secondary netowrks:
         else:
-            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 +
-                 nbus_ABC * 5 + val_bus.idx] = 1
+            A_eq[counteq, nbus_ABC * 3 + nbus_s1s2 + nbus_ABC * 5 + val_bus.idx] = 1
             A_eq[counteq, state_variable_number + val_bus.idx] = 1
             b_eq[counteq] = val_bus.pq[0] * BASE_S * mult
             counteq += 1
@@ -894,9 +923,9 @@ def optimal_power_flow(
             b_ineq[countineq] = -(vmin**2)
             countineq += 1
 
-    prob = cp.Problem(cp.Minimize(
-        admm_penalty_term + q_obj_vector.T @ x),
-        [A_ineq @ x <= b_ineq, A_eq @ x == b_eq]
+    prob = cp.Problem(
+        cp.Minimize(admm_penalty_term + q_obj_vector.T @ x),
+        [A_ineq @ x <= b_ineq, A_eq @ x == b_eq],
     )
 
     prob.solve(solver=cp.CLARABEL, verbose=False)
@@ -946,12 +975,12 @@ def optimal_power_flow(
         if distances[to_bus[i]] - distances[from_bus[i]] == 1:
             actual_from_bus = from_bus[i]
             actual_to_bus = to_bus[i]
-            mul = 1*kw_converter
+            mul = 1 * kw_converter
 
         elif distances[from_bus[i]] - distances[to_bus[i]] == 1:
             actual_from_bus = to_bus[i]
             actual_to_bus = from_bus[i]
-            mul = -1*kw_converter
+            mul = -1 * kw_converter
 
         if actual_to_bus in child_info.buses.keys():
             name = actual_to_bus
@@ -960,12 +989,18 @@ def optimal_power_flow(
             name = actual_from_bus
             line_name = f"{name}_{actual_to_bus}"
 
-        branch_flow[f"{line_name}.1"] = [x.value[k] *
-                                         mul, x.value[k + nbranch_ABC * 3] * mul]
-        branch_flow[f"{line_name}.2"] = [x.value[k + nbranch_ABC]
-                                         * mul, x.value[k + nbranch_ABC * 4] * mul]
-        branch_flow[f"{line_name}.3"] = [x.value[k + nbranch_ABC * 2] * mul,
-                                         x.value[k + nbranch_ABC * 5] * mul]
+        branch_flow[f"{line_name}.1"] = [
+            x.value[k] * mul,
+            x.value[k + nbranch_ABC * 3] * mul,
+        ]
+        branch_flow[f"{line_name}.2"] = [
+            x.value[k + nbranch_ABC] * mul,
+            x.value[k + nbranch_ABC * 4] * mul,
+        ]
+        branch_flow[f"{line_name}.3"] = [
+            x.value[k + nbranch_ABC * 2] * mul,
+            x.value[k + nbranch_ABC * 5] * mul,
+        ]
 
         if f"{name}.1" not in line_flow.keys():
             line_flow[f"{name}.1"] = [0, 0]
@@ -995,8 +1030,7 @@ def optimal_power_flow(
         bus_flows[f"{key}.3"] = [pc, qc]
 
     n_flow_s1s2 = (
-        (nbus_ABC * 3 + nbus_s1s2) +
-        (nbus_ABC * 6 + nbus_s1s2 * 2) + nbranch_ABC * 6
+        (nbus_ABC * 3 + nbus_s1s2) + (nbus_ABC * 6 + nbus_s1s2 * 2) + nbranch_ABC * 6
     )
 
     bus_voltage = {}
@@ -1048,12 +1082,10 @@ def optimal_power_flow(
             x.value[val_bus.idx + state_variable_number] * kw_converter
         )
         opf_control_variable[key]["Pdg_gen"]["B"] = (
-            x.value[nbus_ABC + val_bus.idx +
-                    state_variable_number] * kw_converter
+            x.value[nbus_ABC + val_bus.idx + state_variable_number] * kw_converter
         )
         opf_control_variable[key]["Pdg_gen"]["C"] = (
-            x.value[nbus_ABC * 2 + val_bus.idx +
-                    state_variable_number] * kw_converter
+            x.value[nbus_ABC * 2 + val_bus.idx + state_variable_number] * kw_converter
         )
         opf_control_variable[key]["Qdg_gen"]["A"] = x.value[val_bus.idx + n_Qdg]
         opf_control_variable[key]["Qdg_gen"]["B"] = x.value[
@@ -1064,18 +1096,18 @@ def optimal_power_flow(
         ]
 
         if key in child_info.buses.keys():
-            p = x.value[nbus_ABC * 0 + val_bus.idx + local_variable_number]*mul
-            q = x.value[nbus_ABC * 3 + val_bus.idx + local_variable_number]*mul
+            p = x.value[nbus_ABC * 0 + val_bus.idx + local_variable_number] * mul
+            q = x.value[nbus_ABC * 3 + val_bus.idx + local_variable_number] * mul
             if p != 0.0:
                 aux_load[f"{key}.1"] = [p, q]
 
-            p = x.value[nbus_ABC * 1 + val_bus.idx + local_variable_number]*mul
-            q = x.value[nbus_ABC * 4 + val_bus.idx + local_variable_number]*mul
+            p = x.value[nbus_ABC * 1 + val_bus.idx + local_variable_number] * mul
+            q = x.value[nbus_ABC * 4 + val_bus.idx + local_variable_number] * mul
             if p != 0.0:
                 aux_load[f"{key}.2"] = [p, q]
 
-            p = x.value[nbus_ABC * 2 + val_bus.idx + local_variable_number]*mul
-            q = x.value[nbus_ABC * 5 + val_bus.idx + local_variable_number]*mul
+            p = x.value[nbus_ABC * 2 + val_bus.idx + local_variable_number] * mul
+            q = x.value[nbus_ABC * 5 + val_bus.idx + local_variable_number] * mul
             if p != 0.0:
                 aux_load[f"{key}.3"] = [p, q]
 

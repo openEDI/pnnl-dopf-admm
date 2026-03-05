@@ -1,15 +1,14 @@
-from oedisi.types.common import BrokerConfig
-from opf_federate import run_simulator
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse
-import uvicorn
-import socket
-import traceback
 import json
 import os
+import socket
+import traceback
 
+import uvicorn
+from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from oedisi.componentframework.system_configuration import ComponentStruct
-from oedisi.types.common import ServerReply, HeathCheck, DefaultFileNames
+from oedisi.types.common import BrokerConfig, DefaultFileNames, HeathCheck, ServerReply
+from opf_federate import run_simulator
 
 app = FastAPI()
 
@@ -52,7 +51,8 @@ async def configure(component_struct: ComponentStruct):
     json.dump(links, open(DefaultFileNames.INPUT_MAPPING.value, "w"))
     json.dump(params, open(DefaultFileNames.STATIC_INPUTS.value, "w"))
     response = ServerReply(
-        detail="Sucessfully updated configuration files.").model_dump()
+        detail="Sucessfully updated configuration files."
+    ).model_dump()
     return JSONResponse(response, 200)
 
 
