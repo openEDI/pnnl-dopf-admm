@@ -7,8 +7,7 @@ This component provides:
 
 __version__ = "0.1.0"
 
-from .opf_federate import (ComponentParameters, OPFFederate, StaticConfig,
-                           run_simulator)
+from .opf_federate import ComponentParameters, OPFFederate, StaticConfig, run_simulator
 
 __all__ = [
     "__version__",

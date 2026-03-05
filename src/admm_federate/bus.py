@@ -221,8 +221,8 @@ def update_branch_direction_based_on_root(
             branch_data[branch_id]["fr_idx"] = to_idx
             branch_data[branch_id]["to_idx"] = from_idx
             print(
-                f"Swapped {branch_id}: from {from_bus} to {
-                  to_bus} (now {to_bus} to {from_bus})"
+                f"Swapped {branch_id}: from {from_bus} to {to_bus} "
+                f"(now {to_bus} to {from_bus})"
             )
         else:
             print(f"Kept {branch_id}: from {from_bus} to {to_bus} (no change)")

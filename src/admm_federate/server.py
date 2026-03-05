@@ -7,8 +7,7 @@ import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from oedisi.componentframework.system_configuration import ComponentStruct
-from oedisi.types.common import (BrokerConfig, DefaultFileNames, HeathCheck,
-                                 ServerReply)
+from oedisi.types.common import BrokerConfig, DefaultFileNames, HeathCheck, ServerReply
 from opf_federate import run_simulator
 
 app = FastAPI()
