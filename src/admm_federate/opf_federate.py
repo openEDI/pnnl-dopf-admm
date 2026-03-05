@@ -1,38 +1,29 @@
 import copy
-import logging
-import helics as h
 import json
-from pathlib import Path
-from datetime import datetime
-from oedisi.types.common import BrokerConfig
-from oedisi.types.data_types import (
-    PowersImaginary,
-    PowersReal,
-    PowersMagnitude,
-    PowersAngle,
-    Injection,
-    Topology,
-    VoltagesReal,
-    VoltagesImaginary,
-    VoltagesMagnitude,
-    VoltagesAngle,
-    MeasurementArray,
-    EquipmentNodeArray,
-    CommandList,
-    Command
-)
-import adapter
-import lindistflow
-from dataclasses import asdict
-from area import area_info, check_network_radiality
-import xarray as xr
-from pprint import pprint
-import numpy as np
-import time
-import networkx as nx
+import logging
 import math
+import time
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
+from pprint import pprint
 
+import adapter
+import helics as h
+import lindistflow
+import networkx as nx
+import numpy as np
+import xarray as xr
+from area import area_info, check_network_radiality
+from oedisi.types.common import BrokerConfig
+from oedisi.types.data_types import (Command, CommandList, EquipmentNodeArray,
+                                     Injection, MeasurementArray, PowersAngle,
+                                     PowersImaginary, PowersMagnitude,
+                                     PowersReal, Topology, VoltagesAngle,
+                                     VoltagesImaginary, VoltagesMagnitude,
+                                     VoltagesReal)
 from pydantic import BaseModel
+
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
@@ -76,16 +67,14 @@ def xarray_to_voltages_cart(data, **kwargs):
 def xarray_to_powers_pol(data, **kwargs):
     """Conveniently turn xarray into PowersReal and PowersImaginary."""
     mag = PowersMagnitude(**xarray_to_dict(np.abs(data)), **kwargs)
-    ang = PowersAngle(
-        **xarray_to_dict(np.arctan2(data.imag, data.real)), **kwargs)
+    ang = PowersAngle(**xarray_to_dict(np.arctan2(data.imag, data.real)), **kwargs)
     return mag, ang
 
 
 def xarray_to_voltages_pol(data, **kwargs):
     """Conveniently turn xarray into PowersReal and PowersImaginary."""
     mag = VoltagesMagnitude(**xarray_to_dict(np.abs(data)), **kwargs)
-    ang = VoltagesAngle(
-        **xarray_to_dict(np.arctan2(data.imag, data.real)), **kwargs)
+    ang = VoltagesAngle(**xarray_to_dict(np.arctan2(data.imag, data.real)), **kwargs)
     return mag, ang
 
 
@@ -206,31 +195,31 @@ class OPFFederate(object):
 
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
         # h.helicsFederateSetFlagOption(self.fed, h.helics_flag_slow_responding, True)
-        h.helicsFederateSetTimeProperty(
-            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1)
+        h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1)
 
         # h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_OFFSET, 0.1)
         # h.helicsFederateSetFlagOption(self.fed, h.HELICS_FLAG_UNINTERRUPTIBLE, True)
 
     def register_subscription(self) -> None:
-        self.sub.topology = self.fed.register_subscription(
-            self.inputs["topology"], "")
+        self.sub.topology = self.fed.register_subscription(self.inputs["topology"], "")
         self.sub.injections = self.fed.register_subscription(
-            self.inputs["injections"], "")
+            self.inputs["injections"], ""
+        )
         self.sub.powers_imag = self.fed.register_subscription(
-            self.inputs["power_imag"], "")
+            self.inputs["power_imag"], ""
+        )
         self.sub.powers_real = self.fed.register_subscription(
-            self.inputs["power_real"], "")
+            self.inputs["power_real"], ""
+        )
         self.sub.voltages_imag = self.fed.register_subscription(
-            self.inputs["voltage_imag"], "")
+            self.inputs["voltage_imag"], ""
+        )
         self.sub.voltages_real = self.fed.register_subscription(
-            self.inputs["voltage_real"], "")
-        self.sub.area_v = self.fed.register_subscription(
-            self.inputs["sub_v"], "")
-        self.sub.area_p = self.fed.register_subscription(
-            self.inputs["sub_p"], "")
-        self.sub.area_q = self.fed.register_subscription(
-            self.inputs["sub_q"], "")
+            self.inputs["voltage_real"], ""
+        )
+        self.sub.area_v = self.fed.register_subscription(self.inputs["sub_v"], "")
+        self.sub.area_p = self.fed.register_subscription(self.inputs["sub_p"], "")
+        self.sub.area_q = self.fed.register_subscription(self.inputs["sub_q"], "")
 
     def register_publication(self) -> None:
         self.pub_pv_set = self.fed.register_publication(
@@ -239,18 +228,18 @@ class OPFFederate(object):
         self.pub_solver_stats = self.fed.register_publication(
             "solver_stats", h.HELICS_DATA_TYPE_STRING, ""
         )
-#        self.pub_powers_mag = self.fed.register_publication(
-#            "power_mag", h.HELICS_DATA_TYPE_STRING, ""
-#        )
-#        self.pub_powers_angle = self.fed.register_publication(
-#            "power_angle", h.HELICS_DATA_TYPE_STRING, ""
-#        )
-#        self.pub_voltages_mag = self.fed.register_publication(
-#            "voltage_mag", h.HELICS_DATA_TYPE_STRING, ""
-#        )
-#        self.pub_voltages_angle = self.fed.register_publication(
-#            "voltage_angle", h.HELICS_DATA_TYPE_STRING, ""
-#        )
+        #        self.pub_powers_mag = self.fed.register_publication(
+        #            "power_mag", h.HELICS_DATA_TYPE_STRING, ""
+        #        )
+        #        self.pub_powers_angle = self.fed.register_publication(
+        #            "power_angle", h.HELICS_DATA_TYPE_STRING, ""
+        #        )
+        #        self.pub_voltages_mag = self.fed.register_publication(
+        #            "voltage_mag", h.HELICS_DATA_TYPE_STRING, ""
+        #        )
+        #        self.pub_voltages_angle = self.fed.register_publication(
+        #            "voltage_angle", h.HELICS_DATA_TYPE_STRING, ""
+        #        )
         self.pub_admm_v = self.fed.register_publication(
             "pub_v", h.HELICS_DATA_TYPE_STRING, ""
         )
@@ -307,13 +296,13 @@ class OPFFederate(object):
                 self.shared_lines[v] = f"{v}_{u}"
 
         areas = adapter.disconnect_areas(graph2, boundary)
-        areas = adapter.reconnect_area_switches(
-            areas, boundary)
+        areas = adapter.reconnect_area_switches(areas, boundary)
 
         ids = [a["id"] for _, _, a in boundary]
         for area in areas:
             area_branch, area_bus = adapter.generate_area_info(
-                area, topology, self.parent_bus, ids)
+                area, topology, self.parent_bus, ids
+            )
             if area_branch is not None and area_bus is not None:
                 for u, v in area.edges(self.parent_bus):
                     if self.parent_line == "":
@@ -325,13 +314,13 @@ class OPFFederate(object):
         self.child_info = adapter.BusInfo()
         for k in self.child_buses:
             if k in self.area_bus.buses:
-                self.child_info.buses[k] = copy.deepcopy(
-                    self.area_bus.buses[k])
+                self.child_info.buses[k] = copy.deepcopy(self.area_bus.buses[k])
                 self.child_info.buses[k].pv = np.zeros((3, 2)).tolist()
 
         self.parent_info = adapter.BusInfo()
         self.parent_info.buses[self.parent_bus] = copy.deepcopy(
-            self.area_bus.buses[self.parent_bus])
+            self.area_bus.buses[self.parent_bus]
+        )
         self.parent_info.buses[self.parent_bus].pv = np.zeros((3, 2)).tolist()
 
         logger.debug("Parent Info")
@@ -357,8 +346,7 @@ class OPFFederate(object):
     def first_pub(self):
         self.area_v = VoltagesMagnitude(ids=[], values=[], time=0)
         self.area_p = PowersReal(ids=[], equipment_ids=[], values=[], time=0)
-        self.area_q = PowersImaginary(
-            ids=[], equipment_ids=[], values=[], time=0)
+        self.area_q = PowersImaginary(ids=[], equipment_ids=[], values=[], time=0)
 
         self.pub_admm_v.publish(self.area_v.json())
         self.pub_admm_p.publish(self.area_p.json())
@@ -369,11 +357,10 @@ class OPFFederate(object):
             self.init_area()
 
         voltages_real = VoltagesReal.parse_obj(self.sub.voltages_real.json)
-        voltages_imag = VoltagesImaginary.parse_obj(
-            self.sub.voltages_imag.json)
-        voltages = measurement_to_xarray(
-            voltages_real
-        ) + 1j * measurement_to_xarray(voltages_imag)
+        voltages_imag = VoltagesImaginary.parse_obj(self.sub.voltages_imag.json)
+        voltages = measurement_to_xarray(voltages_real) + 1j * measurement_to_xarray(
+            voltages_imag
+        )
 
         voltages_mag, voltages_ang = xarray_to_voltages_pol(voltages)
         t = voltages_real.time
@@ -381,14 +368,13 @@ class OPFFederate(object):
         voltages_ang.time = t
 
         injections = Injection.parse_obj(self.sub.injections.json)
-        bus_info = adapter.extract_injection(
-            copy.deepcopy(self.area_bus), injections)
+        bus_info = adapter.extract_injection(copy.deepcopy(self.area_bus), injections)
 
-        bus_info = adapter.extract_voltages(
-            bus_info, voltages_mag)
+        bus_info = adapter.extract_voltages(bus_info, voltages_mag)
 
         branch_info, bus_info = adapter.map_secondaries(
-            copy.deepcopy(self.area_branch), bus_info)
+            copy.deepcopy(self.area_branch), bus_info
+        )
 
         with open("bus_info.json", "w") as outfile:
             outfile.write(json.dumps(asdict(bus_info)))
@@ -404,30 +390,24 @@ class OPFFederate(object):
             logger.debug("Updating Area Active Power")
             p = adapter.filter_boundary_power_real(self.shared_buses, p)
             p, p_err = adapter.update_boundary_power_real(p, self.static.name)
-            self.parent_info = adapter.extract_powers_real(
-                self.parent_info, p, True)
-            self.child_info = adapter.extract_powers_real(
-                self.child_info, p, True)
+            self.parent_info = adapter.extract_powers_real(self.parent_info, p, True)
+            self.child_info = adapter.extract_powers_real(self.child_info, p, True)
 
         q = PowersImaginary.parse_obj(self.sub.area_q.json)
         if p.values and self.area_q.values:
             logger.debug("Updating Area Reactive Power")
             q = adapter.filter_boundary_power_imag(self.shared_buses, q)
             q, q_err = adapter.update_boundary_power_imag(q, self.static.name)
-            self.parent_info = adapter.extract_powers_imag(
-                self.parent_info, q, True)
-            self.child_info = adapter.extract_powers_imag(
-                self.child_info, q, True)
+            self.parent_info = adapter.extract_powers_imag(self.parent_info, q, True)
+            self.child_info = adapter.extract_powers_imag(self.child_info, q, True)
 
         vmag = VoltagesMagnitude.parse_obj(self.sub.area_v.json)
         if vmag.values and self.area_v.values:
             logger.debug("Updating Area Voltages")
             vmag = adapter.filter_boundary_voltage(self.switch_buses, vmag)
             vmag, v_err = adapter.update_boundary_voltage(self.area_v, vmag)
-            self.parent_info = adapter.extract_voltages(
-                self.parent_info, vmag)
-            self.child_info = adapter.extract_voltages(
-                self.child_info, vmag)
+            self.parent_info = adapter.extract_voltages(self.parent_info, vmag)
+            self.child_info = adapter.extract_voltages(self.child_info, vmag)
 
         with open("bus_info_updated.json", "w") as outfile:
             outfile.write(json.dumps(asdict(bus_info)))
@@ -439,7 +419,8 @@ class OPFFederate(object):
 
         self.static.config.source_bus = self.parent_bus
         self.static.config.source_line = adapter.get_edge_name(
-            self.area_graph, self.parent_bus)
+            self.area_graph, self.parent_bus
+        )
         self.static.config.relaxed = self.static.relaxed
         v_mag, branch_pq, aux_pq, control, stats = lindistflow.solve(
             branch_info, bus_info, self.child_info, self.parent_info, self.static.config
@@ -463,18 +444,33 @@ class OPFFederate(object):
 
         # CAPTURE STATS FOR PUB
         power_real = PowersReal(
-            ids=list(bp.keys()), values=list(bp.values()), equipment_ids=list(bp.keys()), time=t)
-        self.area_p = copy.deepcopy(adapter.filter_line_power_real(
-            self.shared_buses, power_real, self.static.name))
+            ids=list(bp.keys()),
+            values=list(bp.values()),
+            equipment_ids=list(bp.keys()),
+            time=t,
+        )
+        self.area_p = copy.deepcopy(
+            adapter.filter_line_power_real(
+                self.shared_buses, power_real, self.static.name
+            )
+        )
 
         power_imag = PowersImaginary(
-            ids=list(bq.keys()), values=list(bq.values()), equipment_ids=list(bq.keys()), time=t)
-        self.area_q = copy.deepcopy(adapter.filter_line_power_imag(
-            self.shared_buses, power_imag, self.static.name))
+            ids=list(bq.keys()),
+            values=list(bq.values()),
+            equipment_ids=list(bq.keys()),
+            time=t,
+        )
+        self.area_q = copy.deepcopy(
+            adapter.filter_line_power_imag(
+                self.shared_buses, power_imag, self.static.name
+            )
+        )
 
         vmag = adapter.pack_voltages(v_mag, bus_info, t)
         self.area_v = copy.deepcopy(
-            adapter.filter_boundary_voltage(self.switch_buses, vmag))
+            adapter.filter_boundary_voltage(self.switch_buses, vmag)
+        )
 
         self.pub_admm_p.publish(self.area_p.json())
         self.pub_admm_q.publish(self.area_q.json())
@@ -523,8 +519,9 @@ class OPFFederate(object):
         logger.info(f"Federate executing: {datetime.now()}")
 
         # setting up time properties
-        update_interval = int(h.helicsFederateGetTimeProperty(
-            self.fed, h.HELICS_PROPERTY_TIME_PERIOD))
+        update_interval = int(
+            h.helicsFederateGetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD)
+        )
 
         granted_time = 0
         logger.debug("Step 0: Starting Time/Iter loop")
@@ -538,7 +535,8 @@ class OPFFederate(object):
             while True:
                 logger.debug(f"Step 2: Requesting time {request_time}")
                 granted_time, itr_status = h.helicsFederateRequestTimeIterative(
-                    self.fed, request_time, itr_flag)
+                    self.fed, request_time, itr_flag
+                )
                 logger.info(f"\tgranted time = {granted_time}")
                 logger.info(f"\titr status = {itr_status}")
 

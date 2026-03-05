@@ -1,4 +1,5 @@
 import json
+
 import networkx as nx
 import numpy as np
 
@@ -130,8 +131,7 @@ def correct_secondary_network(branch_data, bus_data, target_bus, leaf_bus):
 
         bus_data[leaf_parent_walk[0 + walk]]["phases"] = correct_xfmr_phases
         if leaf_parent_walk[1 + walk] != target_bus:
-            bus_data[leaf_parent_walk[1 + walk]
-                     ]["phases"] = correct_xfmr_phases
+            bus_data[leaf_parent_walk[1 + walk]]["phases"] = correct_xfmr_phases
 
     ####
 
@@ -220,7 +220,9 @@ def update_branch_direction_based_on_root(
             branch_data[branch_id]["to_bus"] = from_bus
             branch_data[branch_id]["fr_idx"] = to_idx
             branch_data[branch_id]["to_idx"] = from_idx
-            print(f"Swapped {branch_id}: from {from_bus} to {
-                  to_bus} (now {to_bus} to {from_bus})")
+            print(
+                f"Swapped {branch_id}: from {from_bus} to {
+                  to_bus} (now {to_bus} to {from_bus})"
+            )
         else:
             print(f"Kept {branch_id}: from {from_bus} to {to_bus} (no change)")
