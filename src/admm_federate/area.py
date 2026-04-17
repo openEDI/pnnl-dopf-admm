@@ -3,8 +3,9 @@ Created on Sun March 10 12:58:46 2023
 @author: poud579 & Rabayet
 """
 
-import networkx as nx
 import logging
+
+import networkx as nx
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
