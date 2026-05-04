@@ -24,16 +24,19 @@ dependencies = [
 	"plotly",
 	"numpy",
 	"pandas",
-	"OpenDSSDirect.py[extras]==0.7.0",
+	"OpenDSSDirect.py[extras]==0.9.4",
 	"boto3",
 	"xarray",
 	"oedisi>=2.0,<3.0",
 	"bokeh",
+	"distopf",
 ]
 
 [project.scripts]
 admm-federate-server = "admm_federate.server:main"
 admm-federate-sim = "admm_federate.opf_federate:main"
+distopf-federate-server = "distopf_federate.server:main"
+distopf-federate-sim = "distopf_federate.federate:main"
 
 [project.optional-dependencies]
 dev = [
@@ -61,3 +64,6 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.uv.sources]
+distopf = { git = "https://github.com/GRIDAPPSD/distopf", branch = "feature/enapp" }
