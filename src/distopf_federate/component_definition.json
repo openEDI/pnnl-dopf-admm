@@ -1,6 +1,6 @@
 {
     "directory": "distopf_federate",
-    "execute_function": "python federate.py",
+    "execute_function": "distopf-federate-sim",
     "static_inputs": [
         {
             "type": "",

@@ -2,7 +2,7 @@
 
 import logging
 import math
-from typing import Optional
+from typing import Iterator, Optional
 
 import pandas as pd
 
@@ -16,9 +16,57 @@ from oedisi.types.data_types import (
     VoltagesMagnitude,
 )
 
+from distopf_federate.constants import COMMAND_THRESHOLD_W, PHASE_COLS, S_BASE
+
 logger = logging.getLogger(__name__)
 
-S_BASE = 1.0e6  # 1 MVA
+
+def _iter_bus_phases(df: pd.DataFrame, v_base_map: dict) -> Iterator[tuple]:
+    """Yield (bus_name, ph_num, value, v_base) for non-zero, non-NaN phase columns.
+
+    Used by voltage magnitude functions to iterate over per-bus phase values.
+    """
+    for _, row in df.iterrows():
+        bus_name = str(row.get("name", ""))
+        v_base = v_base_map.get(bus_name, 1.0)
+        for col, ph_num in PHASE_COLS:
+            val = row.get(col)
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                continue
+            yield bus_name, ph_num, float(val), v_base
+
+
+def _iter_branch_pq(result) -> Iterator[tuple]:
+    """Yield (fr_name, to_name, ph_str, p_pu, q_pu) for each branch-phase flow.
+
+    Looks up the matching reactive-power row from *result.reactive_power_flows*
+    by (fb, tb, t) index.  Skips entries where P is None or NaN.
+    """
+    p_df: Optional[pd.DataFrame] = getattr(result, "active_power_flows", None)
+    q_df: Optional[pd.DataFrame] = getattr(result, "reactive_power_flows", None)
+    if p_df is None:
+        return
+
+    q_indexed = q_df.set_index(["fb", "tb", "t"]) if (q_df is not None and "fb" in q_df.columns) else None
+
+    for _, p_row in p_df.iterrows():
+        fr_name = str(p_row.get("from_name", ""))
+        to_name = str(p_row.get("to_name", ""))
+        t_val = p_row.get("t", 0)
+        fb = p_row.get("fb")
+        tb = p_row.get("tb")
+
+        for col, ph_str in PHASE_COLS:
+            p_pu = p_row.get(col)
+            if p_pu is None or (isinstance(p_pu, float) and math.isnan(p_pu)):
+                continue
+            q_pu = 0.0
+            if q_indexed is not None:
+                try:
+                    q_pu = float(q_indexed.loc[(fb, tb, t_val), col])
+                except (KeyError, TypeError):
+                    pass
+            yield fr_name, to_name, ph_str, float(p_pu), q_pu
 
 
 def result_to_voltage_mag(
@@ -26,7 +74,7 @@ def result_to_voltage_mag(
     v_ln_base_map: dict,
     time: int,
 ) -> VoltagesMagnitude:
-    """Convert per-unit voltage magnitudes to actual Volts.
+    """Convert per-unit voltage magnitudes to Volts.
 
     Parameters
     ----------
@@ -39,27 +87,17 @@ def result_to_voltage_mag(
     Returns
     -------
     VoltagesMagnitude
-        ids in format "BUSNAME.1", "BUSNAME.2", "BUSNAME.3".
-        values in Volts.
+        ids in format "BUSNAME.1/2/3", values in Volts.  Zero-valued phases omitted.
     """
-    ids = []
-    values = []
-
+    ids, values = [], []
     if result.voltages is None:
         return VoltagesMagnitude(ids=ids, values=values, time=time)
 
-    phase_cols = [("a", 1), ("b", 2), ("c", 3)]
-    for _, row in result.voltages.iterrows():
-        bus_name = str(row.get("name", ""))
-        v_base = v_ln_base_map.get(bus_name, 1.0)
-        for col, ph_num in phase_cols:
-            v_pu = row.get(col)
-            if v_pu is None or (isinstance(v_pu, float) and math.isnan(v_pu)):
-                continue
-            if float(v_pu) == 0.0:
-                continue
-            ids.append(f"{bus_name}.{ph_num}")
-            values.append(float(v_pu) * v_base)
+    for bus_name, ph_num, v_pu, v_base in _iter_bus_phases(result.voltages, v_ln_base_map):
+        if v_pu == 0.0:
+            continue
+        ids.append(f"{bus_name}.{ph_num}")
+        values.append(v_pu * v_base)
 
     return VoltagesMagnitude(ids=ids, values=values, time=time)
 
@@ -68,7 +106,7 @@ def result_to_voltage_angle(
     result,
     time: int,
 ) -> VoltagesAngle:
-    """Convert per-unit voltage angle results to a VoltagesAngle object.
+    """Convert voltage angle results to a VoltagesAngle object.
 
     Parameters
     ----------
@@ -78,25 +116,17 @@ def result_to_voltage_angle(
     Returns
     -------
     VoltagesAngle
-        ids in format "BUSNAME.1", "BUSNAME.2", "BUSNAME.3".
-        values in radians.
+        ids in format "BUSNAME.1/2/3", values in degrees (units match distopf output).
     """
-    ids = []
-    values = []
-
+    ids, values = [], []
     angle_df: Optional[pd.DataFrame] = getattr(result, "voltage_angles", None)
     if angle_df is None:
         return VoltagesAngle(ids=ids, values=values, time=time)
 
-    phase_cols = [("a", 1), ("b", 2), ("c", 3)]
-    for _, row in angle_df.iterrows():
-        bus_name = str(row.get("name", ""))
-        for col, ph_num in phase_cols:
-            angle = row.get(col)
-            if angle is None or (isinstance(angle, float) and math.isnan(angle)):
-                continue
-            ids.append(f"{bus_name}.{ph_num}")
-            values.append(float(angle))
+    # v_base_map not needed for angles — pass empty dict, v_base is unused in the loop
+    for bus_name, ph_num, angle, _ in _iter_bus_phases(angle_df, {}):
+        ids.append(f"{bus_name}.{ph_num}")
+        values.append(angle)
 
     return VoltagesAngle(ids=ids, values=values, time=time)
 
@@ -112,51 +142,22 @@ def result_to_power_mag(
     ----------
     result : PowerFlowResult
     v_ln_base_map : dict[str, float]
-        Bus name → line-to-neutral base voltage in Volts (used to recover S_base).
+        Unused; kept for API consistency with result_to_voltage_mag.
     time : int
 
     Returns
     -------
     PowersMagnitude
-        ids in format "FRBUS_TOBUS.a", "FRBUS_TOBUS.b", "FRBUS_TOBUS.c".
-        values in VA.
+        ids in format "FRBUS_TOBUS.a/b/c", values in VA.
     """
-    ids = []
-    equipment_ids = []
-    values = []
+    ids, equipment_ids, values = [], [], []
 
-    p_df: Optional[pd.DataFrame] = getattr(result, "active_power_flows", None)
-    q_df: Optional[pd.DataFrame] = getattr(result, "reactive_power_flows", None)
-    if p_df is None or q_df is None:
-        return PowersMagnitude(ids=ids, equipment_ids=equipment_ids, values=values, time=time)
-
-    q_indexed = q_df.set_index(["fb", "tb", "t"]) if "fb" in q_df.columns else None
-
-    for _, p_row in p_df.iterrows():
-        fr_name = str(p_row.get("from_name", ""))
-        to_name = str(p_row.get("to_name", ""))
+    for fr_name, to_name, ph_str, p_pu, q_pu in _iter_branch_pq(result):
         branch_key = f"{fr_name}_{to_name}"
-        v_base = v_ln_base_map.get(to_name, v_ln_base_map.get(fr_name, 1.0))
-        s_base_branch = (v_base**2) / 1.0  # uses per-unit with S_BASE=1 MVA
-
-        t_val = p_row.get("t", 0)
-
-        for col, ph_str in [("a", "a"), ("b", "b"), ("c", "c")]:
-            p_pu = p_row.get(col)
-            if p_pu is None or (isinstance(p_pu, float) and math.isnan(p_pu)):
-                continue
-            q_pu = 0.0
-            if q_indexed is not None:
-                try:
-                    fb = p_row.get("fb")
-                    tb = p_row.get("tb")
-                    q_pu = float(q_indexed.loc[(fb, tb, t_val), col])
-                except (KeyError, TypeError):
-                    pass
-            s_mag_pu = math.sqrt(float(p_pu) ** 2 + q_pu**2)
-            ids.append(f"{branch_key}.{ph_str}")
-            equipment_ids.append(branch_key)
-            values.append(s_mag_pu * S_BASE)
+        s_mag_va = math.sqrt(p_pu**2 + q_pu**2) * S_BASE
+        ids.append(f"{branch_key}.{ph_str}")
+        equipment_ids.append(branch_key)
+        values.append(s_mag_va)
 
     return PowersMagnitude(ids=ids, equipment_ids=equipment_ids, values=values, time=time)
 
@@ -175,42 +176,15 @@ def result_to_power_angle(
     Returns
     -------
     PowersAngle
-        ids in format "FRBUS_TOBUS.a".
-        values in radians.
+        ids in format "FRBUS_TOBUS.a/b/c", values in radians.
     """
-    ids = []
-    equipment_ids = []
-    values = []
+    ids, equipment_ids, values = [], [], []
 
-    p_df: Optional[pd.DataFrame] = getattr(result, "active_power_flows", None)
-    q_df: Optional[pd.DataFrame] = getattr(result, "reactive_power_flows", None)
-    if p_df is None or q_df is None:
-        return PowersAngle(ids=ids, equipment_ids=equipment_ids, values=values, time=time)
-
-    q_indexed = q_df.set_index(["fb", "tb", "t"]) if "fb" in q_df.columns else None
-
-    for _, p_row in p_df.iterrows():
-        fr_name = str(p_row.get("from_name", ""))
-        to_name = str(p_row.get("to_name", ""))
+    for fr_name, to_name, ph_str, p_pu, q_pu in _iter_branch_pq(result):
         branch_key = f"{fr_name}_{to_name}"
-        t_val = p_row.get("t", 0)
-
-        for col, ph_str in [("a", "a"), ("b", "b"), ("c", "c")]:
-            p_pu = p_row.get(col)
-            if p_pu is None or (isinstance(p_pu, float) and math.isnan(p_pu)):
-                continue
-            q_pu = 0.0
-            if q_indexed is not None:
-                try:
-                    fb = p_row.get("fb")
-                    tb = p_row.get("tb")
-                    q_pu = float(q_indexed.loc[(fb, tb, t_val), col])
-                except (KeyError, TypeError):
-                    pass
-            angle = math.atan2(q_pu, float(p_pu))
-            ids.append(f"{branch_key}.{ph_str}")
-            equipment_ids.append(branch_key)
-            values.append(angle)
+        ids.append(f"{branch_key}.{ph_str}")
+        equipment_ids.append(branch_key)
+        values.append(math.atan2(q_pu, p_pu))
 
     return PowersAngle(ids=ids, equipment_ids=equipment_ids, values=values, time=time)
 
@@ -239,25 +213,15 @@ def result_to_pub_pqv(
     p_ids, p_eqids, p_vals = [], [], []
     q_ids, q_eqids, q_vals = [], [], []
 
-    phase_cols = [("a", 1), ("b", 2), ("c", 3)]
-
     # Boundary voltages
     if result.voltages is not None:
-        for _, row in result.voltages.iterrows():
-            bus_name = str(row.get("name", ""))
-            if bus_name not in boundary_buses:
+        for bus_name, ph_num, v_pu, v_base in _iter_bus_phases(result.voltages, v_ln_base_map):
+            if bus_name not in boundary_buses or v_pu == 0.0:
                 continue
-            v_base = v_ln_base_map.get(bus_name, 1.0)
-            for col, ph_num in phase_cols:
-                v_pu = row.get(col)
-                if v_pu is None or (isinstance(v_pu, float) and math.isnan(v_pu)):
-                    continue
-                if float(v_pu) == 0.0:
-                    continue
-                v_ids.append(f"{bus_name}.{ph_num}")
-                v_vals.append(float(v_pu) * v_base)
+            v_ids.append(f"{bus_name}.{ph_num}")
+            v_vals.append(v_pu * v_base)
 
-    # Boundary branch power flows (flows into the boundary bus)
+    # Boundary branch power flows (flows into boundary buses)
     p_df: Optional[pd.DataFrame] = getattr(result, "active_power_flows", None)
     q_df: Optional[pd.DataFrame] = getattr(result, "reactive_power_flows", None)
 
@@ -276,7 +240,7 @@ def result_to_pub_pqv(
             branch_key = f"{fr}_{to}"
             qrow = q_lookup.get((fr, to))
 
-            for col, ph_num in phase_cols:
+            for col, ph_num in PHASE_COLS:
                 p_pu = prow.get(col)
                 if p_pu is None or (isinstance(p_pu, float) and math.isnan(p_pu)):
                     continue
@@ -288,9 +252,7 @@ def result_to_pub_pqv(
                 q_pu = 0.0
                 if qrow is not None:
                     q_raw = qrow.get(col)
-                    if q_raw is not None and not (
-                        isinstance(q_raw, float) and math.isnan(q_raw)
-                    ):
+                    if q_raw is not None and not (isinstance(q_raw, float) and math.isnan(q_raw)):
                         q_pu = float(q_raw)
                 q_ids.append(flow_id)
                 q_eqids.append(branch_key)
@@ -357,7 +319,7 @@ def result_to_commands(
             ) * S_BASE
 
         for eq_tag in gen_tags[bus_name]:
-            if abs(p_w) < 1.0 and abs(q_var) < 1.0:
+            if abs(p_w) < COMMAND_THRESHOLD_W and abs(q_var) < COMMAND_THRESHOLD_W:
                 continue
             commands.append((eq_tag, float(p_w), float(q_var)))
 
