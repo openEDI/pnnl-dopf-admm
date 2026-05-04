@@ -19,13 +19,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - name: Set up uv and Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Install uv
-        run: pip install uv
 
       - name: Install dependencies
         run: uv sync --extra test
@@ -35,7 +32,7 @@ jobs:
 
       - name: Archive test results
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && !env.ACT
         with:
           name: test-results-${{ matrix.os }}-py${{ matrix.python-version }}
           path: |
