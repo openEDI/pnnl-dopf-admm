@@ -1,0 +1,20 @@
+services:
+  helics-broker:
+    image: helics/helics:3.4.0
+    command: ["helics_broker", "--federates=1", "--port=23405"]
+    ports:
+      - "23405:23405"
+
+  distopf-federate:
+    build:
+      context: .
+      dockerfile: Dockerfile.distopf
+    environment:
+      PORT: "5903"
+    depends_on:
+      - helics-broker
+    volumes:
+      - ./scenarios:/app/scenarios:ro
+    command: ["python", "server.py"]
+    ports:
+      - "5903:5903"
