@@ -11,9 +11,9 @@ import distopf as opf
 from distopf.api import Case
 from oedisi.types.data_types import Injection, Topology, VoltagesMagnitude
 
-logger = logging.getLogger(__name__)
+from distopf_federate.constants import MIN_GEN_SA_PU, S_BASE
 
-S_BASE = 1e6  # 1 MVA per-unit base
+logger = logging.getLogger(__name__)
 
 
 def _phases_to_str(phases: list) -> str:
@@ -171,56 +171,73 @@ def _extract_base_voltages(topology: Topology) -> dict:
     return result
 
 
-def _extract_base_injections(topology: Topology) -> dict:
-    """Extract base PQ loads and PV generation from topology injections.
+def _parse_injections(real, imag) -> dict:
+    """Parse oedisi PowersReal/PowersImaginary into per-bus P/Q arrays.
+
+    Separates PVSystem generation from load injections.
+
+    Parameters
+    ----------
+    real : PowersReal
+        Real-power injection data with ids, equipment_ids, and values in kW.
+    imag : PowersImaginary
+        Reactive-power injection data with ids, equipment_ids, and values in kVAR.
 
     Returns
     -------
     dict mapping bus_name → {
-        "pq": np.ndarray shape (3, 2) in Watts,
-        "pv": np.ndarray shape (3, 2) in Watts,
-        "tags": list[str],
+        "pq": ndarray shape (3, 2)  — load [P_W, Q_VAR] per phase (positive = consuming),
+        "pv": ndarray shape (3, 2)  — PV generation [P_W, Q_VAR] per phase,
+        "tags": list[str]           — equipment tag strings for PVSystem entries,
     }
     """
-    injections: dict = {}
+    result: dict = {}
 
-    def _ensure(name):
-        if name not in injections:
-            injections[name] = {
-                "pq": np.zeros((3, 2)),
-                "pv": np.zeros((3, 2)),
-                "tags": [],
-            }
-
-    real = topology.injections.power_real
-    imag = topology.injections.power_imaginary
+    def _ensure(name: str) -> None:
+        if name not in result:
+            result[name] = {"pq": np.zeros((3, 2)), "pv": np.zeros((3, 2)), "tags": []}
 
     for id_str, eq, power in zip(real.ids, real.equipment_ids, real.values):
         name, phase_str = id_str.split(".", 1)
         phase = int(phase_str) - 1
         _ensure(name)
-        injections[name]["tags"].append(eq)
+        # kW → W (stored in Watts; divided by S_BASE when written to per-unit DataFrames)
         if "PVSystem" in eq:
-            injections[name]["pv"][phase, 0] += power * 1000.0  # kW → W
+            result[name]["pv"][phase, 0] += power * 1000.0
+            if eq not in result[name]["tags"]:
+                result[name]["tags"].append(eq)
         else:
-            injections[name]["pq"][phase, 0] -= power * 1000.0  # load (negative injection)
+            result[name]["pq"][phase, 0] -= power * 1000.0  # injection sign → load positive
 
     for id_str, eq, power in zip(imag.ids, imag.equipment_ids, imag.values):
         name, phase_str = id_str.split(".", 1)
         phase = int(phase_str) - 1
         _ensure(name)
+        # kVAR → VAR
         if "PVSystem" in eq:
-            injections[name]["pv"][phase, 1] += power * 1000.0
+            result[name]["pv"][phase, 1] += power * 1000.0
         else:
-            injections[name]["pq"][phase, 1] -= power * 1000.0
+            result[name]["pq"][phase, 1] -= power * 1000.0
 
-    return injections
+    return result
+
+
+def _extract_base_injections(topology: Topology) -> dict:
+    """Extract base PQ loads and PV generation from topology injections.
+
+    Returns
+    -------
+    dict mapping bus_name → {"pq": ndarray (3,2) in W, "pv": ndarray (3,2) in W, "tags": list}
+    """
+    return _parse_injections(
+        topology.injections.power_real,
+        topology.injections.power_imaginary,
+    )
 
 
 def topology_to_case(
     topology: Topology,
     source_bus: str,
-    switch_ids: Optional[list] = None,
 ) -> tuple:
     """Convert an oedisi Topology to a distopf Case.
 
@@ -230,9 +247,6 @@ def topology_to_case(
         OEDISI network topology (static data).
     source_bus : str
         Name of the slack/swing bus.
-    switch_ids : list of str, optional
-        Branch IDs that act as spatial-decomposition boundaries.
-        These branches remain CLOSED in the returned Case.
 
     Returns
     -------
@@ -242,25 +256,21 @@ def topology_to_case(
     v_ln_base_map : dict[str, float]
         Bus name → line-to-neutral base voltage in Volts.
     """
-    if switch_ids is None:
-        switch_ids = []
-
     DG, slack_bus = _build_graph(topology)
     admittances = _extract_admittances(DG, topology)
     base_voltages = _extract_base_voltages(topology)
     base_injections = _extract_base_injections(topology)
 
-    # Assign sequential integer IDs in BFS order (1-indexed, source first)
+    # BFS order is already encoded in DG (edges directed away from slack_bus).
+    # Walk nodes in BFS order starting from source_bus and assign 1-indexed IDs.
     bfs_nodes = list(nx.bfs_tree(DG, source_bus).nodes())
     for node in DG.nodes():
         if node not in bfs_nodes:
             bfs_nodes.append(node)
     name_to_id = {name: i + 1 for i, name in enumerate(bfs_nodes)}
 
-    v_ln_base_map = {
-        name: info[0] * 1000.0
-        for name, info in base_voltages.items()
-    }
+    # Bus name → line-to-neutral base voltage in Volts
+    v_ln_base_map = {name: info[0] * 1000.0 for name, info in base_voltages.items()}
 
     # ── bus_data ──────────────────────────────────────────────────────────
     bus_rows = []
@@ -291,7 +301,7 @@ def topology_to_case(
                 "v_a": 1.0,
                 "v_b": 1.0,
                 "v_c": 1.0,
-                "v_ln_base": v_ln_base if v_ln_base > 0 else 1.0,
+                "v_ln_base": v_ln_base if v_ln_base > 0 else 1.0,  # 1.0 V fallback; OPF will warn
                 "s_base": S_BASE,
                 "v_min": 0.95,
                 "v_max": 1.05,
@@ -363,7 +373,9 @@ def topology_to_case(
         phases_str = _phases_to_str(phases) or "abc"
 
         total_pv_pu = pv[:, 0].sum() / S_BASE
-        sa_max_pu = max(total_pv_pu, 0.1)
+        # Use MIN_GEN_SA_PU as a floor to keep the OPF well-conditioned even
+        # when measured output is near zero.
+        sa_max_pu = max(total_pv_pu, MIN_GEN_SA_PU)
 
         gen_rows.append(
             {
@@ -414,60 +426,35 @@ def update_case_from_measurements(
 ) -> Case:
     """Update bus_data loads and gen_data generation from live OEDISI measurements.
 
+    Modifies *case* in-place and returns it for convenience.
+
     Parameters
     ----------
     case : distopf.Case
-        The case to update (modified in-place).
+        The case to update.
     injection : Injection
         Live injection data (PVSystem = generation; others = loads), values in kW/kVAR.
     name_to_id : dict[str, int]
         Bus name → integer bus ID.
     voltages_mag : VoltagesMagnitude, optional
-        Live nodal voltage magnitudes (in Volts) used to update swing bus v_a/v_b/v_c
-        in schedules.
+        Live nodal voltage magnitudes in Volts used to update the swing-bus schedule.
 
     Returns
     -------
     case : distopf.Case
-        Updated case (same object, modified in-place).
+        Same object, modified in-place.
     """
-    load_updates: dict = {}
-    gen_updates: dict = {}
+    parsed = _parse_injections(injection.power_real, injection.power_imaginary)
 
-    def _ensure(name):
-        if name not in load_updates:
-            load_updates[name] = np.zeros((3, 2))
-            gen_updates[name] = np.zeros((3, 2))
-
-    real = injection.power_real
-    imag = injection.power_imaginary
-
-    for id_str, eq, power in zip(real.ids, real.equipment_ids, real.values):
-        name, phase_str = id_str.split(".", 1)
-        phase = int(phase_str) - 1
-        _ensure(name)
-        if "PVSystem" in eq:
-            gen_updates[name][phase, 0] += power * 1000.0  # kW → W
-        else:
-            load_updates[name][phase, 0] -= power * 1000.0
-
-    for id_str, eq, power in zip(imag.ids, imag.equipment_ids, imag.values):
-        name, phase_str = id_str.split(".", 1)
-        phase = int(phase_str) - 1
-        _ensure(name)
-        if "PVSystem" in eq:
-            gen_updates[name][phase, 1] += power * 1000.0
-        else:
-            load_updates[name][phase, 1] -= power * 1000.0
-
-    # Update bus_data loads
-    for bus_name, pq in load_updates.items():
+    # Update bus_data loads (clip to non-negative; distopf does not model load generation)
+    for bus_name, data in parsed.items():
         if bus_name not in name_to_id:
             continue
         bus_id = name_to_id[bus_name]
         mask = case.bus_data["id"] == bus_id
         if not mask.any():
             continue
+        pq = data["pq"]
         case.bus_data.loc[mask, "pl_a"] = max(0.0, pq[0, 0]) / S_BASE
         case.bus_data.loc[mask, "ql_a"] = max(0.0, pq[0, 1]) / S_BASE
         case.bus_data.loc[mask, "pl_b"] = max(0.0, pq[1, 0]) / S_BASE
@@ -475,15 +462,16 @@ def update_case_from_measurements(
         case.bus_data.loc[mask, "pl_c"] = max(0.0, pq[2, 0]) / S_BASE
         case.bus_data.loc[mask, "ql_c"] = max(0.0, pq[2, 1]) / S_BASE
 
-    # Update gen_data generation bounds
+    # Update gen_data setpoints and capacity bounds
     if case.gen_data is not None and not case.gen_data.empty:
-        for bus_name, pv in gen_updates.items():
+        for bus_name, data in parsed.items():
             if bus_name not in name_to_id:
                 continue
             bus_id = name_to_id[bus_name]
             mask = case.gen_data["id"] == bus_id
             if not mask.any():
                 continue
+            pv = data["pv"]
             total_p_pu = pv[:, 0].sum() / S_BASE
             sa_max_pu = max(total_p_pu, 0.0)
             case.gen_data.loc[mask, "pa"] = pv[0, 0] / S_BASE
