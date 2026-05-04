@@ -1,12 +1,13 @@
 """HELICS federate that uses distopf (ENAPP or single-area) for OPF.
 
-Run via:
-    python federate.py
+Run via the installed entry point:
+    distopf-federate-sim
 """
 
 import json
 import logging
 import time as _time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -16,6 +17,7 @@ from oedisi.types.common import BrokerConfig
 from oedisi.types.data_types import (
     Injection,
     MeasurementArray,
+    PowersAngle,
     PowersImaginary,
     PowersMagnitude,
     PowersReal,
@@ -40,8 +42,8 @@ from distopf_federate.exporter import (
 )
 
 logger = logging.getLogger(__name__)
-logger.addHandler(logging.StreamHandler())
-logger.setLevel(logging.DEBUG)
+# Libraries should not configure the root logger; callers decide handler/level.
+logger.addHandler(logging.NullHandler())
 
 OBJECTIVES: dict[str, Callable] = {
     "cp_obj_loss": opf.cp_obj_loss,
@@ -53,41 +55,43 @@ OBJECTIVES: dict[str, Callable] = {
 }
 
 
+@dataclass
 class StaticConfig:
-    name: str
-    deltat: float
-    switches: list
-    source: str
-    objective: str
-    tol: float
-    max_iterations: int
-    t_steps: int
+    name: str = ""
+    deltat: float = 1.0
+    switches: list = field(default_factory=list)
+    source: str = ""
+    objective: str = "cp_obj_none"
+    tol: float = 1e-4
+    max_iterations: int = 50
+    t_steps: int = 1
 
 
+@dataclass
 class Subscriptions:
-    topology: object
-    injections: object
-    powers_real: object
-    powers_imag: object
-    voltages_real: object
-    voltages_imag: object
-    sub_v: object
-    sub_p: object
-    sub_q: object
+    topology: object = None
+    injections: object = None
+    powers_real: object = None
+    powers_imag: object = None
+    voltages_real: object = None
+    voltages_imag: object = None
+    sub_v: object = None
+    sub_p: object = None
+    sub_q: object = None
 
 
 class DistopfFederate:
     """HELICS value federate that runs distopf OPF each timestep."""
 
-    case: Optional[object] = None
-    area_info: Optional[dict] = None
-    name_to_id: Optional[dict] = None
-    v_ln_base_map: Optional[dict] = None
-    gen_tags: Optional[dict] = None
-    boundary_buses: list = []
-    _initialized: bool = False
-
     def __init__(self, broker_config: BrokerConfig) -> None:
+        self.case = None
+        self.area_info: Optional[dict] = None
+        self.name_to_id: Optional[dict] = None
+        self.v_ln_base_map: Optional[dict] = None
+        self.gen_tags: Optional[dict] = None
+        self.boundary_buses: list = []
+        self._initialized: bool = False
+
         self.sub = Subscriptions()
         self.load_static_inputs()
         self.load_input_mapping()
@@ -97,18 +101,19 @@ class DistopfFederate:
         self.register_publication()
 
     def load_static_inputs(self) -> None:
-        self.static = StaticConfig()
         path = Path(__file__).parent / "static_inputs.json"
         with open(path, "r", encoding="utf-8") as fh:
             config = json.load(fh)
-        self.static.name = config["name"]
-        self.static.deltat = float(config.get("deltat", 1.0))
-        self.static.switches = config.get("switches", [])
-        self.static.source = config["source"]
-        self.static.objective = config.get("objective", "cp_obj_none")
-        self.static.tol = float(config.get("tol", 1e-4))
-        self.static.max_iterations = int(config.get("max_iterations", 50))
-        self.static.t_steps = int(config.get("number_of_timesteps", 1))
+        self.static = StaticConfig(
+            name=config["name"],
+            deltat=float(config.get("deltat", 1.0)),
+            switches=config.get("switches", []),
+            source=config["source"],
+            objective=config.get("objective", "cp_obj_none"),
+            tol=float(config.get("tol", 1e-4)),
+            max_iterations=int(config.get("max_iterations", 50)),
+            t_steps=int(config.get("number_of_timesteps", 1)),
+        )
 
     def load_input_mapping(self) -> None:
         path = Path(__file__).parent / "input_mapping.json"
@@ -194,7 +199,6 @@ class DistopfFederate:
         case, name_to_id, v_ln_base_map = topology_to_case(
             topology,
             source_bus=self.static.source,
-            switch_ids=self.static.switches,
         )
 
         self.case = case
@@ -317,11 +321,12 @@ class DistopfFederate:
         return VoltagesMagnitude(ids=ids, values=values, time=time)
 
     def _publish_empty(self, t: int) -> None:
-        """Publish empty/default messages when the OPF fails."""
+        """Publish empty/default messages when the OPF fails or topology is not ready."""
         empty_v = VoltagesMagnitude(ids=[], values=[], time=t)
         empty_p = PowersReal(ids=[], equipment_ids=[], values=[], time=t)
         empty_q = PowersImaginary(ids=[], equipment_ids=[], values=[], time=t)
         empty_mag = PowersMagnitude(ids=[], equipment_ids=[], values=[], time=t)
+        empty_ang = PowersAngle(ids=[], equipment_ids=[], values=[], time=t)
         stats = result_to_solver_stats(
             converged=False,
             objective_value=None,
@@ -332,7 +337,9 @@ class DistopfFederate:
         self.pub_c.publish(json.dumps([]))
         self.pub_solver_stats.publish(stats.json())
         self.pub_voltage_mag.publish(empty_v.json())
+        self.pub_voltage_angle.publish(empty_v.json())
         self.pub_power_mag.publish(empty_mag.json())
+        self.pub_power_angle.publish(empty_ang.json())
         self.pub_v.publish(empty_v.json())
         self.pub_p.publish(empty_p.json())
         self.pub_q.publish(empty_q.json())
@@ -383,13 +390,12 @@ class DistopfFederate:
         h.helicsFederateEnterExecutingMode(self.fed)
         logger.info("Federate executing: %s", datetime.now())
 
-        update_interval = int(
-            h.helicsFederateGetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD)
-        )
+        update_interval = int(self.static.deltat)
+        total_time = self.static.t_steps * update_interval
         granted_time = 0
         objective_fn = self._get_objective_fn()
 
-        while granted_time < self.static.t_steps:
+        while granted_time < total_time:
             request_time = granted_time + update_interval
             granted_time = h.helicsFederateRequestTime(self.fed, request_time)
             t = int(granted_time)
@@ -465,9 +471,7 @@ def run_simulator(broker_config: BrokerConfig) -> None:
 
 
 def main() -> None:
-    from oedisi.types.common import BrokerConfig as _BC
-
-    broker_config = _BC(
+    broker_config = BrokerConfig(
         broker_ip="127.0.0.1",
         broker_port=23404,
     )
