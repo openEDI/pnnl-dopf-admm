@@ -11,11 +11,11 @@
         "profile_location": "gadal_ieee123/profiles",
         "opendss_location": "gadal_ieee123/qsts",
         "feeder_file": "opendss/master.dss",
-	"start_date": "2017-01-01 00:00:00",
-	"number_of_timesteps": 1,
-	"run_freq_sec": 900,
-	"topology_output": "../../outputs/topology.json",
-	"tap_setting": 1
+        "start_date": "2017-01-01 00:00:00",
+        "number_of_timesteps": 1,
+        "run_freq_sec": 900,
+        "topology_output": "../../outputs/topology.json",
+        "tap_setting": 1
       }
     },
     {
@@ -80,7 +80,6 @@
         "vup_tol": 0.01,
         "sdn_tol": 0.01,
         "max_itr": 10,
-        "number_of_timesteps": 24,
         "deltat": 3600,
         "relaxed": false,
         "control_type": "real",
@@ -88,11 +87,13 @@
           "sw2",
           "sw3"
         ],
-        "source": "150",
         "rho_vup": 1000,
         "rho_sup": 0,
         "rho_vdn": 0,
-        "rho_sdn": 1000
+        "rho_sdn": 1000,
+        "t_steps": 24,
+        "source_bus": "150",
+        "source_line": ""
       }
     },
     {
@@ -114,18 +115,19 @@
         "vup_tol": 0.01,
         "sdn_tol": 0.01,
         "max_itr": 10,
-        "number_of_timesteps": 24,
         "deltat": 3600,
         "relaxed": false,
         "control_type": "real",
         "switches": [
           "sw3"
         ],
-        "source": "sw3",
         "rho_vup": 1000,
         "rho_sup": 0,
         "rho_vdn": 0,
-        "rho_sdn": 1000
+        "rho_sdn": 1000,
+        "t_steps": 24,
+        "source_bus": "18",
+        "source_line": "sw3"
       }
     },
     {
@@ -147,7 +149,6 @@
         "vup_tol": 0.01,
         "sdn_tol": 0.01,
         "max_itr": 10,
-        "number_of_timesteps": 24,
         "deltat": 3600,
         "relaxed": false,
         "control_type": "real",
@@ -155,11 +156,13 @@
           "sw2",
           "sw4"
         ],
-        "source": "sw2",
         "rho_vup": 1000,
         "rho_sup": 0,
         "rho_vdn": 0,
-        "rho_sdn": 1000
+        "rho_sdn": 1000,
+        "t_steps": 24,
+        "source_bus": "13",
+        "source_line": "sw2"
       }
     },
     {
@@ -181,7 +184,6 @@
         "vup_tol": 0.01,
         "sdn_tol": 0.01,
         "max_itr": 10,
-        "number_of_timesteps": 24,
         "deltat": 3600,
         "relaxed": false,
         "control_type": "real",
@@ -189,11 +191,13 @@
           "sw4",
           "sw5"
         ],
-        "source": "sw4",
         "rho_vup": 1000,
         "rho_sup": 0,
         "rho_vdn": 0,
-        "rho_sdn": 1000
+        "rho_sdn": 1000,
+        "t_steps": 24,
+        "source_bus": "60",
+        "source_line": "sw4"
       }
     },
     {
@@ -215,18 +219,19 @@
         "vup_tol": 0.01,
         "sdn_tol": 0.01,
         "max_itr": 10,
-        "number_of_timesteps": 24,
         "deltat": 3600,
         "relaxed": false,
         "control_type": "real",
         "switches": [
           "sw5"
         ],
-        "source": "sw5",
         "rho_vup": 1000,
         "rho_sup": 0,
         "rho_vdn": 0,
-        "rho_sdn": 1000
+        "rho_sdn": 1000,
+        "t_steps": 24,
+        "source_bus": "97",
+        "source_line": "sw5"
       }
     },
     {

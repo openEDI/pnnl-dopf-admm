@@ -316,7 +316,8 @@ def generate() -> None:
     link_feeder(system, feeder)
 
     switch_map = {}
-    source_map = {}
+    source_bus_map = {}
+    source_line_map = {}
     for i, area in enumerate(areas):
         src = []
         switches = []
@@ -326,11 +327,13 @@ def generate() -> None:
                 src.append((u, v, a))
 
         if area.has_node(slack_bus):
-            source_map[i] = slack_bus
+            source_bus_map[i] = slack_bus
+            source_line_map[i] = ""
         else:
 
             su, sv, sa = get_area_source(G, slack_bus, src)
-            source_map[i] = sa["id"]
+            source_bus_map[i] = su
+            source_line_map[i] = sa["id"]
 
         switch_map[i] = switches
 
@@ -413,12 +416,13 @@ def generate() -> None:
                 "vup_tol": 0.01,
                 "sdn_tol": 0.01,
                 "max_itr": max_itr,
-                "number_of_timesteps": T_STEPS,
+                "t_steps": T_STEPS,
                 "deltat": DELTA_T,
                 "relaxed": False,
                 "control_type": "real",
                 "switches": switch_map[k],
-                "source": source_map[k],
+                "source_bus": source_bus_map[k],
+                "source_line": source_line_map[k],
                 "rho_vup": rho_vup[k],
                 "rho_sup": 0,
                 "rho_vdn": 0,

@@ -2,11 +2,9 @@ import copy
 import json
 import logging
 import math
-import time
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from pprint import pprint
 
 import helics as h
 import networkx as nx
@@ -32,7 +30,6 @@ from oedisi.types.data_types import (
 from pydantic import BaseModel
 
 from admm_federate import adapter, lindistflow
-from admm_federate.area import area_info, check_network_radiality
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -89,6 +86,7 @@ def xarray_to_voltages_pol(data, **kwargs):
 
 
 class ComponentParameters(BaseModel):
+    name: str
     t_steps: int
     max_itr: int
     control_type: str
@@ -104,21 +102,7 @@ class ComponentParameters(BaseModel):
     sdn_tol: float
 
 
-class StaticConfig(object):
-    name: str
-    vup_tol: float
-    sdn_tol: float
-    deltat: float
-    max_itr: int
-    t_steps: int
-    control_type: str
-    relaxed: bool
-    switches: list[str]
-    source: str
-    config: lindistflow.ADMMConfig
-
-
-class Subscriptions(object):
+class Subscriptions:
     powers_real: PowersReal
     powers_imag: PowersImaginary
     voltages_real: VoltagesReal
@@ -132,7 +116,7 @@ class Subscriptions(object):
     area_q: PowersImaginary
 
 
-class OPFFederate(object):
+class OPFFederate:
     converged: bool = False
     parent_bus: str = ""
     parent_line: str = ""
@@ -160,36 +144,28 @@ class OPFFederate(object):
 
     def load_component_definition(self) -> None:
         path = Path(__file__).parent / "component_definition.json"
-        with open(path, "r", encoding="UTF-8") as file:
+        with open(path, encoding="UTF-8") as file:
             self.component_config = json.load(file)
 
     def load_input_mapping(self):
         path = Path(__file__).parent / "input_mapping.json"
-        with open(path, "r", encoding="UTF-8") as file:
+        with open(path, encoding="UTF-8") as file:
             self.inputs = json.load(file)
 
     def load_static_inputs(self):
-        self.static = StaticConfig()
         path = Path(__file__).parent / "static_inputs.json"
-        with open(path, "r", encoding="UTF-8") as file:
+        with open(path, encoding="UTF-8") as file:
             config = json.load(file)
 
-        self.static.name = config["name"]
-        self.static.vup_tol = config["vup_tol"]
-        self.static.sdn_tol = config["sdn_tol"]
-        self.static.deltat = config["deltat"]
-        self.static.max_itr = config["max_itr"]
-        self.static.t_steps = config["number_of_timesteps"]
-        self.static.control_type = config["control_type"]
-        self.static.relaxed = config["relaxed"]
-        self.static.switches = config["switches"]
-        self.static.source = config["source"]
-        self.static.config = lindistflow.ADMMConfig()
-        self.static.config.relaxed = config["relaxed"]
-        self.static.config.rho_vup = config["rho_vup"]
-        self.static.config.rho_sup = config["rho_sup"]
-        self.static.config.rho_vdn = config["rho_vdn"]
-        self.static.config.rho_sdn = config["rho_sdn"]
+        self.static = ComponentParameters.parse_obj(config)
+        self.deltat = config["deltat"]
+
+        self.admm_config = lindistflow.ADMMConfig()
+        self.admm_config.relaxed = self.static.relaxed
+        self.admm_config.rho_vup = self.static.rho_vup
+        self.admm_config.rho_sup = self.static.rho_sup
+        self.admm_config.rho_vdn = self.static.rho_vdn
+        self.admm_config.rho_sdn = self.static.rho_sdn
 
     def initilize(self, broker_config) -> None:
         self.info = h.helicsCreateFederateInfo()
@@ -197,7 +173,7 @@ class OPFFederate(object):
         self.info.core_type = h.HELICS_CORE_TYPE_ZMQ
         self.info.core_init = "--federates=1"
 
-        # h.helicsFederateInfoSetTimeProperty(self.info, h.helics_property_time_delta, self.static.deltat)
+        # h.helicsFederateInfoSetTimeProperty(self.info, h.helics_property_time_delta, self.deltat)
 
         h.helicsFederateInfoSetBroker(self.info, broker_config.broker_ip)
         h.helicsFederateInfoSetBrokerPort(self.info, broker_config.broker_port)
@@ -205,7 +181,7 @@ class OPFFederate(object):
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
         # h.helicsFederateSetFlagOption(self.fed, h.helics_flag_slow_responding, True)
         h.helicsFederateSetTimeProperty(
-            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, self.static.deltat
+            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, self.deltat
         )
 
         # h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_OFFSET, 0.1)
@@ -273,21 +249,23 @@ class OPFFederate(object):
     def init_area(self):
         topology: Topology = Topology.parse_obj(self.sub.topology.json)
         branch_info, bus_info, slack_bus = adapter.extract_info(topology)
-        self.static.config.slack = slack_bus
+        self.admm_config.slack = slack_bus
 
         G = adapter.generate_graph(topology.incidences, slack_bus)
         graph = copy.deepcopy(G)
         graph2 = copy.deepcopy(G)
         boundaries = adapter.area_disconnects(graph)
 
-        upstream = []
-        if self.static.source == slack_bus:
+        if self.static.source_bus == slack_bus:
             self.parent_bus = slack_bus
             self.shared_buses.append(slack_bus)
 
         boundary = []
         for u, v, a in boundaries:
-            if a["id"] in self.static.switches and not a["id"] == self.static.source:
+            if (
+                a["id"] in self.static.switches
+                and not a["id"] == self.static.source_line
+            ):
                 boundary.append((u, v, a))
                 self.child_buses.append(v)
                 self.shared_buses.append(v)
@@ -296,7 +274,7 @@ class OPFFederate(object):
                 self.shared_lines[u] = f"{u}_{v}"
                 self.shared_lines[v] = f"{v}_{u}"
 
-            if a["id"] == self.static.source:
+            if a["id"] == self.static.source_line:
                 boundary.append((u, v, a))
                 self.parent_bus = u
                 self.shared_buses.append(u)
@@ -429,13 +407,13 @@ class OPFFederate(object):
         if not adapter.check_radiality(branch_info, bus_info):
             logger.warning("Network radiality constraint violated on current topology!")
 
-        self.static.config.source_bus = self.parent_bus
-        self.static.config.source_line = adapter.get_edge_name(
+        self.admm_config.source_bus = self.parent_bus
+        self.admm_config.source_line = adapter.get_edge_name(
             self.area_graph, self.parent_bus
         )
-        self.static.config.relaxed = self.static.relaxed
+        self.admm_config.relaxed = self.static.relaxed
         v_mag, branch_pq, aux_pq, control, stats = lindistflow.solve(
-            branch_info, bus_info, self.child_info, self.parent_info, self.static.config
+            branch_info, bus_info, self.child_info, self.parent_info, self.admm_config
         )
         real_setpts = self.get_set_points(control, bus_info)
 
@@ -542,7 +520,7 @@ class OPFFederate(object):
 
             granted_time = 0
             logger.debug("Step 0: Starting Time/Iter loop")
-            while granted_time < self.static.t_steps * self.static.deltat:
+            while granted_time < self.static.t_steps * self.deltat:
                 request_time = granted_time + update_interval
                 logger.debug("Step 1: published initial values for iteration")
                 itr_flag = itr_need
@@ -585,10 +563,10 @@ class OPFFederate(object):
 
 
 def run_simulator(broker_config: BrokerConfig) -> None:
-    #    schema = ComponentParameters.schema_json(indent=2)
-    #    with open("./admm_federate/admm_schema.json", "w") as f:
-    #        f.write(schema)
-    #
+    schema = ComponentParameters.schema_json(indent=2)
+    with open("./schema.json", "w") as f:
+        f.write(schema)
+
     sfed = OPFFederate(broker_config)
     sfed.run()
 

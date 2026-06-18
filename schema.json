@@ -2,6 +2,10 @@
   "title": "ComponentParameters",
   "type": "object",
   "properties": {
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
     "t_steps": {
       "title": "T Steps",
       "type": "integer"
@@ -59,6 +63,7 @@
     }
   },
   "required": [
+    "name",
     "t_steps",
     "max_itr",
     "control_type",
