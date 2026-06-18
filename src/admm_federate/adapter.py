@@ -13,6 +13,7 @@ from oedisi.types.data_types import (
     CommandList,
     EquipmentNodeArray,
     Incidence,
+    IncidenceList,
     Injection,
     InverterControlList,
     MeasurementArray,
@@ -204,7 +205,7 @@ def extract_forecast(bus: dict, forecast) -> dict:
         name = name.upper()
 
         if name not in bus:
-            print("NOT IN BUS: ", name)
+            logger.warning(f"NOT IN BUS: {name}")
             continue
 
         phases = bus[name]["phases"]
@@ -523,7 +524,7 @@ def extract_transformers(incidences: Incidence) -> (list[str], list[str]):
     return xfmrs
 
 
-def generate_graph(inc: Incidence, slack_bus: str) -> nx.Graph:
+def generate_graph(inc: IncidenceList, slack_bus: str) -> nx.Graph:
     graph = nx.Graph()
     for src, dst, id in zip(inc.from_equipment, inc.to_equipment, inc.ids):
         if "OPEN" in src or "OPEN" in dst:
@@ -547,6 +548,7 @@ def generate_graph(inc: Incidence, slack_bus: str) -> nx.Graph:
     for c in nx.connected_components(graph):
         if slack_bus in c:
             return graph.subgraph(c).copy()
+    return graph
 
 
 def tag_regulators(branch_info: BranchInfo, bus_info: BusInfo) -> BranchInfo:
@@ -1149,6 +1151,6 @@ def update_branch_direction_based_on_root(
             branch_data[branch_id]["to_bus"] = from_bus
             branch_data[branch_id]["fr_idx"] = to_idx
             branch_data[branch_id]["to_idx"] = from_idx
-            print(f"Swapped {branch_id}: now from={to_bus} to={from_bus}")
+            logger.debug(f"Swapped {branch_id}: now from={to_bus} to={from_bus}")
         else:
-            print(f"Kept {branch_id}: from {from_bus} to {to_bus} (no change)")
+            logger.debug(f"Kept {branch_id}: from {from_bus} to {to_bus} (no change)")

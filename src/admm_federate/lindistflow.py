@@ -7,7 +7,8 @@ from enum import Enum
 
 import cvxpy as cp
 import numpy as np
-from adapter import Branch, BranchInfo, Bus, BusInfo, branch_distance
+
+from admm_federate.adapter import Branch, BranchInfo, Bus, BusInfo, branch_distance
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -81,6 +82,12 @@ def convert_pu(
             base_kv = 1e6  # impedance will become near zero
         else:
             base_kv = bus_pu.buses[v.fr_bus].base_kv
+
+        if base_kv <= 0.0:
+            logger.warning(
+                f"Invalid base_kv ({base_kv}) for branch {k}. Defaulting base_kv to 1e6 to avoid division by zero."
+            )
+            base_kv = 1e6
 
         z_base = 1 / (base_kv**2 / 100)
         branch_pu.branches[k].zprim = [

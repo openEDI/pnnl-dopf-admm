@@ -8,13 +8,10 @@ from datetime import datetime
 from pathlib import Path
 from pprint import pprint
 
-import adapter
 import helics as h
-import lindistflow
 import networkx as nx
 import numpy as np
 import xarray as xr
-from area import area_info, check_network_radiality
 from oedisi.types.common import BrokerConfig
 from oedisi.types.data_types import (
     Command,
@@ -33,6 +30,9 @@ from oedisi.types.data_types import (
     VoltagesReal,
 )
 from pydantic import BaseModel
+
+from admm_federate import adapter, lindistflow
+from admm_federate.area import area_info, check_network_radiality
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -180,7 +180,6 @@ class OPFFederate(object):
         self.static.deltat = config["deltat"]
         self.static.max_itr = config["max_itr"]
         self.static.t_steps = config["number_of_timesteps"]
-        self.static.deltat = 1
         self.static.control_type = config["control_type"]
         self.static.relaxed = config["relaxed"]
         self.static.switches = config["switches"]
@@ -205,7 +204,9 @@ class OPFFederate(object):
 
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
         # h.helicsFederateSetFlagOption(self.fed, h.helics_flag_slow_responding, True)
-        h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1)
+        h.helicsFederateSetTimeProperty(
+            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, self.static.deltat
+        )
 
         # h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_OFFSET, 0.1)
         # h.helicsFederateSetFlagOption(self.fed, h.HELICS_FLAG_UNINTERRUPTIBLE, True)
@@ -353,10 +354,10 @@ class OPFFederate(object):
                         setpoints[tag] = p + 1j * q
         return setpoints
 
-    def first_pub(self):
-        self.area_v = VoltagesMagnitude(ids=[], values=[], time=0)
-        self.area_p = PowersReal(ids=[], equipment_ids=[], values=[], time=0)
-        self.area_q = PowersImaginary(ids=[], equipment_ids=[], values=[], time=0)
+    def first_pub(self, t):
+        self.area_v = VoltagesMagnitude(ids=[], values=[], time=t)
+        self.area_p = PowersReal(ids=[], equipment_ids=[], values=[], time=t)
+        self.area_q = PowersImaginary(ids=[], equipment_ids=[], values=[], time=t)
 
         self.pub_admm_v.publish(self.area_v.json())
         self.pub_admm_p.publish(self.area_p.json())
@@ -404,7 +405,7 @@ class OPFFederate(object):
             self.child_info = adapter.extract_powers_real(self.child_info, p, True)
 
         q = PowersImaginary.parse_obj(self.sub.area_q.json)
-        if p.values and self.area_q.values:
+        if q.values and self.area_q.values:
             logger.debug("Updating Area Reactive Power")
             q = adapter.filter_boundary_power_imag(self.shared_buses, q)
             q, q_err = adapter.update_boundary_power_imag(q, self.static.name)
@@ -425,7 +426,8 @@ class OPFFederate(object):
         with open("branch_info_updated.json", "w") as outfile:
             outfile.write(json.dumps(asdict(branch_info)))
 
-        assert adapter.check_radiality(branch_info, bus_info)
+        if not adapter.check_radiality(branch_info, bus_info):
+            logger.warning("Network radiality constraint violated on current topology!")
 
         self.static.config.source_bus = self.parent_bus
         self.static.config.source_line = adapter.get_edge_name(
@@ -492,8 +494,12 @@ class OPFFederate(object):
             if abs(val) < 1e-6:
                 continue
 
-            commands.append((eq, val.real, val.imag))
-        self.pub_pv_set.publish(json.dumps(commands))
+            commands.append(Command(obj_name=eq, obj_property="kW", val=str(val.real)))
+            commands.append(
+                Command(obj_name=eq, obj_property="kvar", val=str(val.imag))
+            )
+        cmd_list = CommandList(__root__=commands)
+        self.pub_pv_set.publish(cmd_list.json())
 
         # CAPTURE STATS FOR PUB
         stats["admm_iteration"] = self.itr
@@ -501,7 +507,7 @@ class OPFFederate(object):
         stats["sdn"] = math.sqrt(p_err**2 + q_err**2)
         logger.debug(f"Errors : {stats['vup']}, {stats['sdn']}")
 
-        if all([v_err != 0, p_err != 0, q_err != 0]):
+        if self.itr > 1:
             v_settled = stats["vup"] <= self.static.vup_tol
             p_settled = stats["sdn"] <= self.static.sdn_tol
             if v_settled and p_settled:
@@ -522,62 +528,54 @@ class OPFFederate(object):
         # self.pub_powers_angle.publish(power_ang.json())
 
     def run(self) -> None:
-        logger.info(f"Federate connected: {datetime.now()}")
-        itr_need = h.helics_iteration_request_iterate_if_needed
-        itr_stop = h.helics_iteration_request_no_iteration
-        h.helicsFederateEnterExecutingMode(self.fed)
-        logger.info(f"Federate executing: {datetime.now()}")
+        try:
+            logger.info(f"Federate connected: {datetime.now()}")
+            itr_need = h.helics_iteration_request_iterate_if_needed
+            itr_stop = h.helics_iteration_request_no_iteration
+            h.helicsFederateEnterExecutingMode(self.fed)
+            logger.info(f"Federate executing: {datetime.now()}")
 
-        # setting up time properties
-        update_interval = int(
-            h.helicsFederateGetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD)
-        )
+            # setting up time properties
+            update_interval = int(
+                h.helicsFederateGetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD)
+            )
 
-        granted_time = 0
-        logger.debug("Step 0: Starting Time/Iter loop")
-        while granted_time <= self.static.t_steps:
-            request_time = granted_time + update_interval
-            logger.debug("Step 1: published initial values for iteration")
-            itr_flag = itr_need
-            self.first_pub()
-            self.converged = False
-            self.itr = 0
-            while True:
-                logger.debug(f"Step 2: Requesting time {request_time}")
-                granted_time, itr_status = h.helicsFederateRequestTimeIterative(
-                    self.fed, request_time, itr_flag
-                )
-                logger.info(f"\tgranted time = {granted_time}")
-                logger.info(f"\titr status = {itr_status}")
-
-                logger.debug("Step 3: checking if next step")
-
-                if itr_status == h.helics_iteration_result_next_step:
-                    logger.debug(f"\titr next: {self.itr}")
-                    itr_flag = itr_stop
-                    break
-
-                if self.converged:
-                    logger.debug(f"\tconverged: {self.itr}")
-                    itr_flag = itr_stop
-                    break
-
-                self.itr += 1
-                logger.debug("Step 4: update iteration")
-                logger.info(f"\titr: {self.itr}")
-
-                logger.debug("Step 5: checking max itr count")
-                if self.itr >= self.static.max_itr:
-                    logger.debug("\t reached max itr")
-                    itr_flag = itr_stop
-                    break
-
-                logger.debug("Step 6: run solution solution")
-                self.itr_pub()
+            granted_time = 0
+            logger.debug("Step 0: Starting Time/Iter loop")
+            while granted_time < self.static.t_steps * self.static.deltat:
+                request_time = granted_time + update_interval
+                logger.debug("Step 1: published initial values for iteration")
                 itr_flag = itr_need
+                self.first_pub(granted_time)
+                self.converged = False
+                self.itr = 0
+                while True:
+                    logger.debug(f"Step 2: Requesting time {request_time}")
+                    granted_time, itr_status = h.helicsFederateRequestTimeIterative(
+                        self.fed, request_time, itr_flag
+                    )
+                    logger.info(f"\tgranted time = {granted_time}")
+                    logger.info(f"\titr status = {itr_status}")
 
-        logger.debug("FINISHED")
-        self.stop()
+                    if itr_status == h.helics_iteration_result_next_step:
+                        logger.debug(f"\titr next: {self.itr}")
+                        break
+
+                    self.itr += 1
+                    logger.debug("Step 4: update iteration")
+                    logger.info(f"\titr: {self.itr}")
+
+                    logger.debug("Step 6: run solution")
+                    self.itr_pub()
+
+                    if self.converged or self.itr >= self.static.max_itr:
+                        itr_flag = itr_stop
+                    else:
+                        itr_flag = itr_need
+
+            logger.debug("FINISHED")
+        finally:
+            self.stop()
 
     def stop(self) -> None:
         h.helicsFederateDisconnect(self.fed)
@@ -595,5 +593,13 @@ def run_simulator(broker_config: BrokerConfig) -> None:
     sfed.run()
 
 
+def main() -> None:
+    broker_config = BrokerConfig(
+        broker_ip="127.0.0.1",
+        broker_port=23404,
+    )
+    run_simulator(broker_config)
+
+
 if __name__ == "__main__":
-    run_simulator(BrokerConfig(broker_ip="127.0.0.1"))
+    main()

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import socket
 import traceback
@@ -8,7 +9,12 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from oedisi.componentframework.system_configuration import ComponentStruct
 from oedisi.types.common import BrokerConfig, DefaultFileNames, HeathCheck, ServerReply
-from opf_federate import run_simulator
+
+from admm_federate.opf_federate import run_simulator
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.StreamHandler())
+logger.setLevel(logging.DEBUG)
 
 app = FastAPI()
 
@@ -30,7 +36,7 @@ def read_root():
 
 @app.post("/run")
 async def run_model(broker_config: BrokerConfig, background_tasks: BackgroundTasks):
-    print(broker_config)
+    logger.info(f"Broker configuration: {broker_config}")
     try:
         background_tasks.add_task(run_simulator, broker_config)
         response = ServerReply(detail="Task sucessfully added.").model_dump()
@@ -56,5 +62,9 @@ async def configure(component_struct: ComponentStruct):
     return JSONResponse(response, 200)
 
 
-if __name__ == "__main__":
+def main():
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ["PORT"]))
+
+
+if __name__ == "__main__":
+    main()
