@@ -1,8 +1,0 @@
-{
-  "Feeder": "/home/tylor/dev/oedisi-components/Components/LocalFeeder/component_definition.json",
-  "Recorder": "/home/tylor/dev/oedisi-components/Components/recorder/component_definition.json",
-  "VoltageHub": "/home/tylor/dev/oedisi-components/Components/pnnl-hub-voltage/component_definition.json",
-  "PowerHub": "/home/tylor/dev/oedisi-components/Components/pnnl-hub-power/component_definition.json",
-  "ControlHub": "/home/tylor/dev/oedisi-components/Components/pnnl-hub-control/component_definition.json",
-  "OptimalPowerFlow": "/home/tylor/dev/pnnl-dopf-admm/component_definition.json"
-}
