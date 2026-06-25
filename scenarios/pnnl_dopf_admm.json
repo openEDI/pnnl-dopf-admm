@@ -410,18 +410,6 @@
       "target_port": "voltage_imag"
     },
     {
-      "source": "feeder",
-      "source_port": "power_real",
-      "target": "admm_0",
-      "target_port": "power_real"
-    },
-    {
-      "source": "feeder",
-      "source_port": "power_imag",
-      "target": "admm_0",
-      "target_port": "power_imag"
-    },
-    {
       "source": "admm_0",
       "source_port": "solver_stats",
       "target": "recorder_solver_stats_admm_0",
@@ -450,18 +438,6 @@
       "source_port": "voltage_imag",
       "target": "admm_1",
       "target_port": "voltage_imag"
-    },
-    {
-      "source": "feeder",
-      "source_port": "power_real",
-      "target": "admm_1",
-      "target_port": "power_real"
-    },
-    {
-      "source": "feeder",
-      "source_port": "power_imag",
-      "target": "admm_1",
-      "target_port": "power_imag"
     },
     {
       "source": "admm_1",
@@ -494,18 +470,6 @@
       "target_port": "voltage_imag"
     },
     {
-      "source": "feeder",
-      "source_port": "power_real",
-      "target": "admm_2",
-      "target_port": "power_real"
-    },
-    {
-      "source": "feeder",
-      "source_port": "power_imag",
-      "target": "admm_2",
-      "target_port": "power_imag"
-    },
-    {
       "source": "admm_2",
       "source_port": "solver_stats",
       "target": "recorder_solver_stats_admm_2",
@@ -536,18 +500,6 @@
       "target_port": "voltage_imag"
     },
     {
-      "source": "feeder",
-      "source_port": "power_real",
-      "target": "admm_3",
-      "target_port": "power_real"
-    },
-    {
-      "source": "feeder",
-      "source_port": "power_imag",
-      "target": "admm_3",
-      "target_port": "power_imag"
-    },
-    {
       "source": "admm_3",
       "source_port": "solver_stats",
       "target": "recorder_solver_stats_admm_3",
@@ -576,18 +528,6 @@
       "source_port": "voltage_imag",
       "target": "admm_4",
       "target_port": "voltage_imag"
-    },
-    {
-      "source": "feeder",
-      "source_port": "power_real",
-      "target": "admm_4",
-      "target_port": "power_real"
-    },
-    {
-      "source": "feeder",
-      "source_port": "power_imag",
-      "target": "admm_4",
-      "target_port": "power_imag"
     },
     {
       "source": "admm_4",

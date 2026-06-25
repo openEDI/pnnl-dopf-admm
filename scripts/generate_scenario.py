@@ -433,9 +433,10 @@ def generate() -> None:
         link_algo(system, algo, feeder)
 
     with open(f"{SCENARIOS}/{system.name}.json", "w") as f:
-        f.write(system.json())
+        f.write(system.model_dump_json())
 
-    check = WiringDiagram.parse_file(f"{SCENARIOS}/{system.name}.json")
+    with open(f"{SCENARIOS}/{system.name}.json") as f:
+        check = WiringDiagram.model_validate_json(f.read())
 
     components = {}
     for c in system.components:
@@ -457,7 +458,7 @@ def get_topology(path: str) -> Topology:
     assert os.path.exists(path), "need to generate topology from base scenario"
 
     with open(path) as f:
-        topology = Topology.parse_obj(json.load(f))
+        topology = Topology.model_validate(json.load(f))
 
     return topology
 

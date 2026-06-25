@@ -14,12 +14,9 @@ from oedisi.types.common import BrokerConfig
 from oedisi.types.data_types import (
     Command,
     CommandList,
-    EquipmentNodeArray,
     Injection,
     MeasurementArray,
-    PowersAngle,
     PowersImaginary,
-    PowersMagnitude,
     PowersReal,
     Topology,
     VoltagesAngle,
@@ -36,17 +33,6 @@ logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
 
 
-def eqarray_to_xarray(eq: EquipmentNodeArray):
-    return xr.DataArray(
-        eq.values,
-        dims=("ids",),
-        coords={
-            "ids": eq.ids,
-            "equipment_ids": ("ids", eq.equipment_ids),
-        },
-    )
-
-
 def measurement_to_xarray(eq: MeasurementArray):
     return xr.DataArray(eq.values, coords={"ids": eq.ids})
 
@@ -57,29 +43,8 @@ def xarray_to_dict(data):
     return {"values": list(data.data), **coords}
 
 
-def xarray_to_powers_cart(data, **kwargs):
-    """Conveniently turn xarray into PowersReal and PowersImaginary."""
-    real = PowersReal(**xarray_to_dict(data.real), **kwargs)
-    imag = PowersImaginary(**xarray_to_dict(data.imag), **kwargs)
-    return real, imag
-
-
-def xarray_to_voltages_cart(data, **kwargs):
-    """Conveniently turn xarray into PowersReal and PowersImaginary."""
-    real = VoltagesReal(**xarray_to_dict(data.real), **kwargs)
-    imag = VoltagesImaginary(**xarray_to_dict(data.imag), **kwargs)
-    return real, imag
-
-
-def xarray_to_powers_pol(data, **kwargs):
-    """Conveniently turn xarray into PowersReal and PowersImaginary."""
-    mag = PowersMagnitude(**xarray_to_dict(np.abs(data)), **kwargs)
-    ang = PowersAngle(**xarray_to_dict(np.arctan2(data.imag, data.real)), **kwargs)
-    return mag, ang
-
-
 def xarray_to_voltages_pol(data, **kwargs):
-    """Conveniently turn xarray into PowersReal and PowersImaginary."""
+    """Conveniently turn xarray into VoltagesMagnitude and VoltagesAngle."""
     mag = VoltagesMagnitude(**xarray_to_dict(np.abs(data)), **kwargs)
     ang = VoltagesAngle(**xarray_to_dict(np.arctan2(data.imag, data.real)), **kwargs)
     return mag, ang
@@ -103,14 +68,10 @@ class ComponentParameters(BaseModel):
 
 
 class Subscriptions:
-    powers_real: PowersReal
-    powers_imag: PowersImaginary
     voltages_real: VoltagesReal
     voltages_imag: VoltagesImaginary
-    available_power: PowersReal
     injections: Injection
     topology: Topology
-    pv_forecast: list
     area_v: VoltagesMagnitude
     area_p: PowersReal
     area_q: PowersImaginary
@@ -143,21 +104,21 @@ class OPFFederate:
         self.register_publication()
 
     def load_component_definition(self) -> None:
-        path = Path(__file__).parent / "component_definition.json"
+        path = Path("component_definition.json")
         with open(path, encoding="UTF-8") as file:
             self.component_config = json.load(file)
 
     def load_input_mapping(self):
-        path = Path(__file__).parent / "input_mapping.json"
+        path = Path("input_mapping.json")
         with open(path, encoding="UTF-8") as file:
             self.inputs = json.load(file)
 
     def load_static_inputs(self):
-        path = Path(__file__).parent / "static_inputs.json"
+        path = Path("static_inputs.json")
         with open(path, encoding="UTF-8") as file:
             config = json.load(file)
 
-        self.static = ComponentParameters.parse_obj(config)
+        self.static = ComponentParameters.model_validate(config)
         self.deltat = config["deltat"]
 
         self.admm_config = lindistflow.ADMMConfig()
@@ -181,7 +142,7 @@ class OPFFederate:
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
         # h.helicsFederateSetFlagOption(self.fed, h.helics_flag_slow_responding, True)
         h.helicsFederateSetTimeProperty(
-            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, self.deltat
+            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1
         )
 
         # h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_OFFSET, 0.1)
@@ -189,21 +150,19 @@ class OPFFederate:
 
     def register_subscription(self) -> None:
         self.sub.topology = self.fed.register_subscription(self.inputs["topology"], "")
+        self.sub.topology.option[h.HELICS_HANDLE_OPTION_IGNORE_INTERRUPTS] = True
         self.sub.injections = self.fed.register_subscription(
             self.inputs["injections"], ""
         )
-        self.sub.powers_imag = self.fed.register_subscription(
-            self.inputs["power_imag"], ""
-        )
-        self.sub.powers_real = self.fed.register_subscription(
-            self.inputs["power_real"], ""
-        )
+        self.sub.injections.option[h.HELICS_HANDLE_OPTION_IGNORE_INTERRUPTS] = True
         self.sub.voltages_imag = self.fed.register_subscription(
-            self.inputs["voltage_imag"], ""
+            self.inputs["voltages_imag"], ""
         )
+        self.sub.voltages_imag.option[h.HELICS_HANDLE_OPTION_IGNORE_INTERRUPTS] = True
         self.sub.voltages_real = self.fed.register_subscription(
-            self.inputs["voltage_real"], ""
+            self.inputs["voltages_real"], ""
         )
+        self.sub.voltages_real.option[h.HELICS_HANDLE_OPTION_IGNORE_INTERRUPTS] = True
         self.sub.area_v = self.fed.register_subscription(self.inputs["sub_v"], "")
         self.sub.area_p = self.fed.register_subscription(self.inputs["sub_p"], "")
         self.sub.area_q = self.fed.register_subscription(self.inputs["sub_q"], "")
@@ -247,7 +206,7 @@ class OPFFederate:
         return branches
 
     def init_area(self):
-        topology: Topology = Topology.parse_obj(self.sub.topology.json)
+        topology: Topology = Topology.model_validate(self.sub.topology.json)
         branch_info, bus_info, slack_bus = adapter.extract_info(topology)
         self.admm_config.slack = slack_bus
 
@@ -320,6 +279,50 @@ class OPFFederate:
         logger.debug("Shared Info")
         logger.debug(f"\tbuses = {self.shared_buses}")
 
+        # HELICS Synchronization Deadlock Prevention Mechanism:
+        #
+        # In a co-simulation involving an iterative federate (like this ADMM solver/Hubs)
+        # and a non-iterative federate (like the Feeder), a circular startup deadlock can occur.
+        # This happens because the iterative federates must iterate at the start time 0.0,
+        # requesting iterative times from HELICS, while the non-iterative Feeder expects to
+        # progress time linearly. If the iterative federate blocks waiting for initial
+        # measurements (voltages, injections) from the Feeder, and the Feeder is blocked
+        # waiting for the first step to progress or to receive control commands, neither can proceed.
+        #
+        # To resolve this circular dependency, we query nominal/base voltages and nominal
+        # injections from the static topology and establish them as default values on their
+        # respective subscriptions using `set_default()`.
+        # This allows HELICS to immediately return these nominal values to the ADMM area on startup
+        # without waiting for the Feeder to publish them, thus breaking the circular deadlock.
+        # We use a timezone-naive fallback timestamp (e.g. datetime.now() if not present) for compatibility.
+        ids = topology.base_voltage_magnitudes.ids
+        mags = topology.base_voltage_magnitudes.values
+        angles_map = dict(zip(topology.base_voltage_angles.ids, topology.base_voltage_angles.values))
+        
+        real_vals = []
+        imag_vals = []
+        for i, node_id in enumerate(ids):
+            mag = mags[i]
+            ang = angles_map.get(node_id, 0.0)
+            v = mag * np.exp(1j * ang)
+            real_vals.append(v.real)
+            imag_vals.append(v.imag)
+            
+        time_val = topology.injections.power_real.time or datetime.now()
+        default_v_real = VoltagesReal(ids=ids, values=real_vals, time=time_val)
+        default_v_imag = VoltagesImaginary(ids=ids, values=imag_vals, time=time_val)
+        
+        self.sub.voltages_real.set_default(default_v_real.model_dump_json())
+        self.sub.voltages_imag.set_default(default_v_imag.model_dump_json())
+        self.sub.injections.set_default(topology.injections.model_dump_json())
+
+        # Extract nominal PV capacities from topology injections
+        # Used later to translate active power kW commands to %Pmpp setpoints
+        self.pv_capacities = {}
+        for val, eq_id in zip(topology.injections.power_real.values, topology.injections.power_real.equipment_ids):
+            if eq_id.lower().startswith("pvsystem."):
+                self.pv_capacities[eq_id] = self.pv_capacities.get(eq_id, 0.0) + float(val)
+
     def get_set_points(self, control: dict, bus_info: adapter.BusInfo) -> dict[complex]:
         setpoints = {}
         for key, val in control.items():
@@ -345,8 +348,8 @@ class OPFFederate:
         if self.area_graph is None:
             self.init_area()
 
-        voltages_real = VoltagesReal.parse_obj(self.sub.voltages_real.json)
-        voltages_imag = VoltagesImaginary.parse_obj(self.sub.voltages_imag.json)
+        voltages_real = VoltagesReal.model_validate(self.sub.voltages_real.json)
+        voltages_imag = VoltagesImaginary.model_validate(self.sub.voltages_imag.json)
         voltages = measurement_to_xarray(voltages_real) + 1j * measurement_to_xarray(
             voltages_imag
         )
@@ -356,7 +359,7 @@ class OPFFederate:
         voltages_mag.time = t
         voltages_ang.time = t
 
-        injections = Injection.parse_obj(self.sub.injections.json)
+        injections = Injection.model_validate(self.sub.injections.json)
         bus_info = adapter.extract_injection(copy.deepcopy(self.area_bus), injections)
 
         bus_info = adapter.extract_voltages(bus_info, voltages_mag)
@@ -374,7 +377,7 @@ class OPFFederate:
         p_err = 0
         q_err = 0
         v_err = 0
-        p = PowersReal.parse_obj(self.sub.area_p.json)
+        p = PowersReal.model_validate(self.sub.area_p.json)
         if p.values and self.area_p.values:
             logger.debug("Updating Area Active Power")
             p = adapter.filter_boundary_power_real(self.shared_buses, p)
@@ -382,7 +385,7 @@ class OPFFederate:
             self.parent_info = adapter.extract_powers_real(self.parent_info, p, True)
             self.child_info = adapter.extract_powers_real(self.child_info, p, True)
 
-        q = PowersImaginary.parse_obj(self.sub.area_q.json)
+        q = PowersImaginary.model_validate(self.sub.area_q.json)
         if q.values and self.area_q.values:
             logger.debug("Updating Area Reactive Power")
             q = adapter.filter_boundary_power_imag(self.shared_buses, q)
@@ -390,7 +393,7 @@ class OPFFederate:
             self.parent_info = adapter.extract_powers_imag(self.parent_info, q, True)
             self.child_info = adapter.extract_powers_imag(self.child_info, q, True)
 
-        vmag = VoltagesMagnitude.parse_obj(self.sub.area_v.json)
+        vmag = VoltagesMagnitude.model_validate(self.sub.area_v.json)
         if vmag.values and self.area_v.values:
             logger.debug("Updating Area Voltages")
             vmag = adapter.filter_boundary_voltage(self.switch_buses, vmag)
@@ -467,17 +470,48 @@ class OPFFederate:
         self.pub_admm_v.publish(self.area_v.json())
 
         # SET COMMANDS FOR PUB
+        #
+        # PVSystem Command Translation Logic:
+        # OpenDSS PVSystem objects receive active power commands in terms of percentage
+        # of their nominal capacity (%Pmpp), rather than in kW. If we send kW directly,
+        # OpenDSS will not command them correctly. Thus, for any device prefix starting with
+        # "pvsystem.", we scale the desired real power setpoint by the nominal capacity
+        # extracted from the topology injections to obtain %Pmpp. We also send %Cutout=0 and
+        # %Cutin=0 commands to ensure the PV system remains connected.
+        #
+        # Other device types (like Storage):
+        # We pass through kW properties directly.
+        #
+        # Reactive power (kvar) properties for all devices:
+        # Passed through directly.
         commands = []
         for eq, val in real_setpts.items():
             if abs(val) < 1e-6:
                 continue
 
-            commands.append(Command(obj_name=eq, obj_property="kW", val=str(val.real)))
+            if eq.lower().startswith("pvsystem."):
+                max_pv = self.pv_capacities.get(eq, 50.0)
+                p = val.real
+                if max_pv <= 0:
+                    obj_val = 100.0
+                elif p == 0:
+                    obj_val = 0.0
+                elif p < max_pv:
+                    obj_val = p / float(max_pv) * 100.0
+                else:
+                    obj_val = 100.0
+                
+                commands.append(Command(obj_name=eq, obj_property="%Pmpp", val=str(obj_val)))
+                commands.append(Command(obj_name=eq, obj_property="%Cutout", val="0"))
+                commands.append(Command(obj_name=eq, obj_property="%Cutin", val="0"))
+            else:
+                commands.append(Command(obj_name=eq, obj_property="kW", val=str(val.real)))
+
             commands.append(
                 Command(obj_name=eq, obj_property="kvar", val=str(val.imag))
             )
-        cmd_list = CommandList(__root__=commands)
-        self.pub_pv_set.publish(cmd_list.json())
+        cmd_list = CommandList(root=commands)
+        self.pub_pv_set.publish(cmd_list.model_dump_json())
 
         # CAPTURE STATS FOR PUB
         stats["admm_iteration"] = self.itr
@@ -563,7 +597,7 @@ class OPFFederate:
 
 
 def run_simulator(broker_config: BrokerConfig) -> None:
-    schema = ComponentParameters.schema_json(indent=2)
+    schema = json.dumps(ComponentParameters.model_json_schema(), indent=2)
     with open("./schema.json", "w") as f:
         f.write(schema)
 

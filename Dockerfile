@@ -5,6 +5,6 @@ RUN mkdir OptimalPowerFlow
 COPY  ./src/admm_federate/ ./OptimalPowerFlow
 COPY ./requirements.txt ./OptimalPowerFlow/
 WORKDIR ./OptimalPowerFlow
-RUN pip install -r requirements.txt
+RUN pip install .
 EXPOSE 5903/tcp
 CMD ["python", "server.py"]

@@ -82,14 +82,6 @@
         },
         {
             "type": "PowersReal",
-            "port_id": "power_real"
-        },
-        {
-            "type": "PowersImaginary",
-            "port_id": "power_imag"
-        },
-        {
-            "type": "PowersReal",
             "port_id": "sub_p"
         },
         {
