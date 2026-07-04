@@ -140,14 +140,18 @@ class OPFFederate:
         self.info.core_type = h.HELICS_CORE_TYPE_ZMQ
         self.info.core_init = "--federates=1"
 
-        # h.helicsFederateInfoSetTimeProperty(self.info, h.helics_property_time_delta, self.deltat)
+        # h.helicsFederateInfoSetTimeProperty(
+        #     self.info, h.helics_property_time_delta, self.deltat
+        # )
 
         h.helicsFederateInfoSetBroker(self.info, broker_config.broker_ip)
         h.helicsFederateInfoSetBrokerPort(self.info, broker_config.broker_port)
 
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
         # h.helicsFederateSetFlagOption(self.fed, h.helics_flag_slow_responding, True)
-        h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1)
+        h.helicsFederateSetTimeProperty(
+            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, self.deltat
+        )
 
         # h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_OFFSET, 0.1)
         # h.helicsFederateSetFlagOption(self.fed, h.HELICS_FLAG_UNINTERRUPTIBLE, True)
@@ -290,22 +294,46 @@ class OPFFederate:
         logger.debug("Shared Info")
         logger.debug(f"\tbuses = {self.shared_buses}")
 
+        # Check if subscription defaults and pv capacities are already set.
+        # If not, set them now (fallback path if topology wasn't
+        # available in initializing mode).
+        if not hasattr(self, "pv_capacities") or not self.pv_capacities:
+            self.set_subscription_defaults(topology)
+
+    def get_set_points(
+        self, control: dict[str, dict], bus_info: adapter.BusInfo
+    ) -> dict[str, complex]:
+        setpoints = {}
+        for key, val in control.items():
+            if key in bus_info.buses:
+                bus = bus_info.buses[key]
+                for tag in set(bus.tags):
+                    if "PVSystem" in tag:
+                        p = max([p for p in val["Pdg_gen"].values()])
+                        q = max([q for q in val["Qdg_gen"].values()])
+                        setpoints[tag] = p + 1j * q
+        return setpoints
+
+    def set_subscription_defaults(self, topology: Topology) -> None:
         # HELICS Synchronization Deadlock Prevention Mechanism:
         #
-        # In a co-simulation involving an iterative federate (like this ADMM solver/Hubs)
-        # and a non-iterative federate (like the Feeder), a circular startup deadlock can occur.
-        # This happens because the iterative federates must iterate at the start time 0.0,
-        # requesting iterative times from HELICS, while the non-iterative Feeder expects to
-        # progress time linearly. If the iterative federate blocks waiting for initial
-        # measurements (voltages, injections) from the Feeder, and the Feeder is blocked
-        # waiting for the first step to progress or to receive control commands, neither can proceed.
+        # In a co-simulation involving an iterative federate (like this ADMM
+        # solver/Hubs) and a non-iterative federate (like the Feeder), a
+        # circular startup deadlock can occur. This happens because the
+        # iterative federates must iterate at the start time 0.0, requesting
+        # iterative times from HELICS, while the non-iterative Feeder expects to
+        # progress time linearly. If the iterative federate blocks waiting for
+        # initial measurements (voltages, injections) from the Feeder, and the
+        # Feeder is blocked waiting for the first step to progress or to
+        # receive control commands, neither can proceed.
         #
-        # To resolve this circular dependency, we query nominal/base voltages and nominal
-        # injections from the static topology and establish them as default values on their
-        # respective subscriptions using `set_default()`.
-        # This allows HELICS to immediately return these nominal values to the ADMM area on startup
-        # without waiting for the Feeder to publish them, thus breaking the circular deadlock.
-        # We use a timezone-naive fallback timestamp (e.g. datetime.now() if not present) for compatibility.
+        # To resolve this circular dependency, we query nominal/base voltages
+        # and nominal injections from the static topology and establish them as
+        # default values on their respective subscriptions using `set_default()`.
+        # This allows HELICS to immediately return these nominal values to the
+        # ADMM area on startup without waiting for the Feeder to publish them,
+        # thus breaking the circular deadlock. We use a timezone-naive fallback
+        # timestamp (e.g. datetime.now() if not present) for compatibility.
         ids = topology.base_voltage_magnitudes.ids
         mags = topology.base_voltage_magnitudes.values
         angles_map = dict(
@@ -341,28 +369,14 @@ class OPFFederate:
                     val
                 )
 
-    def get_set_points(
-        self, control: dict[str, dict], bus_info: adapter.BusInfo
-    ) -> dict[str, complex]:
-        setpoints = {}
-        for key, val in control.items():
-            if key in bus_info.buses:
-                bus = bus_info.buses[key]
-                for tag in set(bus.tags):
-                    if "PVSystem" in tag:
-                        p = max([p for p in val["Pdg_gen"].values()])
-                        q = max([q for q in val["Qdg_gen"].values()])
-                        setpoints[tag] = p + 1j * q
-        return setpoints
-
     def first_pub(self, t: float) -> None:
         self.area_v = VoltagesMagnitude(ids=[], values=[], time=t)
         self.area_p = PowersReal(ids=[], equipment_ids=[], values=[], time=t)
         self.area_q = PowersImaginary(ids=[], equipment_ids=[], values=[], time=t)
 
-        self.pub_admm_v.publish(self.area_v.json())
-        self.pub_admm_p.publish(self.area_p.json())
-        self.pub_admm_q.publish(self.area_q.json())
+        self.pub_admm_v.publish(self.area_v.model_dump_json())
+        self.pub_admm_p.publish(self.area_p.model_dump_json())
+        self.pub_admm_q.publish(self.area_q.model_dump_json())
 
     def itr_pub(self) -> None:
         if self.area_graph is None:
@@ -485,18 +499,19 @@ class OPFFederate:
             adapter.filter_boundary_voltage(self.switch_buses, vmag)
         )
 
-        self.pub_admm_p.publish(self.area_p.json())
-        self.pub_admm_q.publish(self.area_q.json())
-        self.pub_admm_v.publish(self.area_v.json())
+        self.pub_admm_p.publish(self.area_p.model_dump_json())
+        self.pub_admm_q.publish(self.area_q.model_dump_json())
+        self.pub_admm_v.publish(self.area_v.model_dump_json())
 
         # SET COMMANDS FOR PUB
         #
         # PVSystem Command Translation Logic:
-        # OpenDSS PVSystem objects receive active power commands in terms of percentage
-        # of their nominal capacity (%Pmpp), rather than in kW. If we send kW directly,
-        # OpenDSS will not command them correctly. Thus, for any device prefix starting with
-        # "pvsystem.", we scale the desired real power setpoint by the nominal capacity
-        # extracted from the topology injections to obtain %Pmpp. We also send %Cutout=0 and
+        # OpenDSS PVSystem objects receive active power commands in terms of
+        # percentage of their nominal capacity (%Pmpp), rather than in kW. If
+        # we send kW directly, OpenDSS will not command them correctly. Thus,
+        # for any device prefix starting with "pvsystem.", we scale the desired
+        # real power setpoint by the nominal capacity extracted from the
+        # topology injections to obtain %Pmpp. We also send %Cutout=0 and
         # %Cutin=0 commands to ensure the PV system remains connected.
         #
         # Other device types (like Storage):
@@ -524,8 +539,6 @@ class OPFFederate:
                 commands.append(
                     Command(obj_name=eq, obj_property="%Pmpp", val=str(obj_val))
                 )
-                commands.append(Command(obj_name=eq, obj_property="%Cutout", val="0"))
-                commands.append(Command(obj_name=eq, obj_property="%Cutin", val="0"))
             else:
                 commands.append(
                     Command(obj_name=eq, obj_property="kW", val=str(val.real))
@@ -534,8 +547,6 @@ class OPFFederate:
             commands.append(
                 Command(obj_name=eq, obj_property="kvar", val=str(val.imag))
             )
-        cmd_list = CommandList(root=commands)
-        self.pub_pv_set.publish(cmd_list.model_dump_json())
 
         # CAPTURE STATS FOR PUB
         stats["admm_iteration"] = self.itr
@@ -550,24 +561,44 @@ class OPFFederate:
                 logger.debug("Converged")
                 self.converged = True
 
+        # Only publish command setpoints when converged or max iteration is reached
+        if self.converged or self.itr >= self.static.max_itr:
+            cmd_list = CommandList(root=commands)
+            self.pub_pv_set.publish(cmd_list.model_dump_json())
+
         solver_stats = MeasurementArray(
             ids=list(stats.keys()),
             values=list(stats.values()),
             time=t,
             units="s",
         )
-        self.pub_solver_stats.publish(solver_stats.json())
+        self.pub_solver_stats.publish(solver_stats.model_dump_json())
 
-        # self.pub_voltages_mag.publish(v_mag.json())
-        # self.pub_voltages_angle.publish(voltages_ang.json())
-        # self.pub_powers_mag.publish(power_mag.json())
-        # self.pub_powers_angle.publish(power_ang.json())
+        # self.pub_voltages_mag.publish(v_mag.model_dump_json())
+        # self.pub_voltages_angle.publish(voltages_ang.model_dump_json())
+        # self.pub_powers_mag.publish(power_mag.model_dump_json())
+        # self.pub_powers_angle.publish(power_ang.model_dump_json())
 
     def run(self) -> None:
         try:
             logger.info(f"Federate connected: {datetime.now()}")
             itr_need = h.helics_iteration_request_iterate_if_needed
             itr_stop = h.helics_iteration_request_no_iteration
+
+            # Hybrid Fallback Initialization Pattern
+            h.helicsFederateEnterInitializingMode(self.fed)
+            try:
+                topo_json = self.sub.topology.json
+                if topo_json:
+                    topology = Topology.model_validate(topo_json)
+                    self.set_subscription_defaults(topology)
+                    logger.info(
+                        "Successfully configured subscription defaults "
+                        "in initialization mode."
+                    )
+            except Exception as e:
+                logger.debug(f"Topology not available during initialization mode: {e}")
+
             h.helicsFederateEnterExecutingMode(self.fed)
             logger.info(f"Federate executing: {datetime.now()}")
 
@@ -593,6 +624,16 @@ class OPFFederate:
                     logger.info(f"\tgranted time = {granted_time}")
                     logger.info(f"\titr status = {itr_status}")
 
+                    if granted_time >= h.HELICS_TIME_MAXTIME:
+                        logger.info("HELICS Max Time reached. Exiting loop.")
+                        break
+
+                    if itr_status == h.helics_iteration_result_error:
+                        logger.error(
+                            "HELICS iteration request failed with error status."
+                        )
+                        break
+
                     if itr_status == h.helics_iteration_result_next_step:
                         logger.debug(f"\titr next: {self.itr}")
                         break
@@ -608,6 +649,12 @@ class OPFFederate:
                         itr_flag = itr_stop
                     else:
                         itr_flag = itr_need
+
+                if (
+                    granted_time >= h.HELICS_TIME_MAXTIME
+                    or itr_status == h.helics_iteration_result_error
+                ):
+                    break
 
             logger.debug("FINISHED")
         finally:
