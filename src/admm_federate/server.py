@@ -20,7 +20,7 @@ app = FastAPI()
 
 
 @app.get("/")
-def read_root():
+def read_root() -> JSONResponse:
     hostname = socket.gethostname()
     host_ip = "127.0.0.1"
     try:
@@ -35,7 +35,9 @@ def read_root():
 
 
 @app.post("/run")
-async def run_model(broker_config: BrokerConfig, background_tasks: BackgroundTasks):
+async def run_model(
+    broker_config: BrokerConfig, background_tasks: BackgroundTasks
+) -> JSONResponse:
     logger.info(f"Broker configuration: {broker_config}")
     try:
         background_tasks.add_task(run_simulator, broker_config)
@@ -43,26 +45,28 @@ async def run_model(broker_config: BrokerConfig, background_tasks: BackgroundTas
         return JSONResponse(response, 200)
     except Exception as _:
         err = traceback.format_exc()
-        HTTPException(500, str(err))
+        raise HTTPException(500, detail=str(err))
 
 
 @app.post("/configure")
-async def configure(component_struct: ComponentStruct):
+async def configure(component_struct: ComponentStruct) -> JSONResponse:
     component = component_struct.component
     params = component.parameters
     params["name"] = component.name
     links = {}
     for link in component_struct.links:
         links[link.target_port] = f"{link.source}/{link.source_port}"
-    json.dump(links, open(DefaultFileNames.INPUT_MAPPING.value, "w"))
-    json.dump(params, open(DefaultFileNames.STATIC_INPUTS.value, "w"))
+    with open(DefaultFileNames.INPUT_MAPPING.value, "w", encoding="UTF-8") as f:
+        json.dump(links, f)
+    with open(DefaultFileNames.STATIC_INPUTS.value, "w", encoding="UTF-8") as f:
+        json.dump(params, f)
     response = ServerReply(
         detail="Sucessfully updated configuration files."
     ).model_dump()
     return JSONResponse(response, 200)
 
 
-def main():
+def main() -> None:
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ["PORT"]))
 
 

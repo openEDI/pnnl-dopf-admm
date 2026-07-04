@@ -33,17 +33,19 @@ logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.DEBUG)
 
 
-def measurement_to_xarray(eq: MeasurementArray):
+def measurement_to_xarray(eq: MeasurementArray) -> xr.DataArray:
     return xr.DataArray(eq.values, coords={"ids": eq.ids})
 
 
-def xarray_to_dict(data):
+def xarray_to_dict(data: xr.DataArray) -> dict[str, list]:
     """Convert xarray to dict with values and ids for JSON serialization."""
     coords = {key: list(data.coords[key].data) for key in data.coords.keys()}
     return {"values": list(data.data), **coords}
 
 
-def xarray_to_voltages_pol(data, **kwargs):
+def xarray_to_voltages_pol(
+    data: xr.DataArray, **kwargs: dict
+) -> tuple[VoltagesMagnitude, VoltagesAngle]:
     """Conveniently turn xarray into VoltagesMagnitude and VoltagesAngle."""
     mag = VoltagesMagnitude(**xarray_to_dict(np.abs(data)), **kwargs)
     ang = VoltagesAngle(**xarray_to_dict(np.arctan2(data.imag, data.real)), **kwargs)
@@ -81,21 +83,25 @@ class OPFFederate:
     converged: bool = False
     parent_bus: str = ""
     parent_line: str = ""
-    child_buses: [str] = []
-    shared_buses: [str] = []
-    switch_buses: [str] = []
-    shared_lines: {str, str} = {}
-    area_graph: nx.Graph = None
-    area_branch: adapter.BranchInfo = None
-    area_bus: adapter.BusInfo = None
-    parent_info: adapter.BusInfo = None
-    child_info: adapter.BusInfo = None
+    child_buses: list[str]
+    shared_buses: list[str]
+    switch_buses: list[str]
+    shared_lines: dict[str, str]
+    area_graph: nx.Graph | None = None
+    area_branch: adapter.BranchInfo | None = None
+    area_bus: adapter.BusInfo | None = None
+    parent_info: adapter.BusInfo | None = None
+    child_info: adapter.BusInfo | None = None
     area_v: VoltagesMagnitude
     area_p: PowersReal
     area_q: PowersImaginary
 
-    def __init__(self, broker_config) -> None:
+    def __init__(self, broker_config: BrokerConfig) -> None:
         self.sub = Subscriptions()
+        self.child_buses = []
+        self.shared_buses = []
+        self.switch_buses = []
+        self.shared_lines = {}
         self.load_static_inputs()
         self.load_input_mapping()
         self.initilize(broker_config)
@@ -108,12 +114,12 @@ class OPFFederate:
         with open(path, encoding="UTF-8") as file:
             self.component_config = json.load(file)
 
-    def load_input_mapping(self):
+    def load_input_mapping(self) -> None:
         path = Path("input_mapping.json")
         with open(path, encoding="UTF-8") as file:
             self.inputs = json.load(file)
 
-    def load_static_inputs(self):
+    def load_static_inputs(self) -> None:
         path = Path("static_inputs.json")
         with open(path, encoding="UTF-8") as file:
             config = json.load(file)
@@ -128,7 +134,7 @@ class OPFFederate:
         self.admm_config.rho_vdn = self.static.rho_vdn
         self.admm_config.rho_sdn = self.static.rho_sdn
 
-    def initilize(self, broker_config) -> None:
+    def initilize(self, broker_config: BrokerConfig) -> None:
         self.info = h.helicsCreateFederateInfo()
         self.info.core_name = self.static.name
         self.info.core_type = h.HELICS_CORE_TYPE_ZMQ
@@ -141,9 +147,7 @@ class OPFFederate:
 
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
         # h.helicsFederateSetFlagOption(self.fed, h.helics_flag_slow_responding, True)
-        h.helicsFederateSetTimeProperty(
-            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1
-        )
+        h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1)
 
         # h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_OFFSET, 0.1)
         # h.helicsFederateSetFlagOption(self.fed, h.HELICS_FLAG_UNINTERRUPTIBLE, True)
@@ -151,21 +155,28 @@ class OPFFederate:
     def register_subscription(self) -> None:
         self.sub.topology = self.fed.register_subscription(self.inputs["topology"], "")
         self.sub.topology.option[h.HELICS_HANDLE_OPTION_IGNORE_INTERRUPTS] = True
+        self.sub.topology.option[h.HELICS_HANDLE_OPTION_CONNECTION_OPTIONAL] = True
         self.sub.injections = self.fed.register_subscription(
             self.inputs["injections"], ""
         )
         self.sub.injections.option[h.HELICS_HANDLE_OPTION_IGNORE_INTERRUPTS] = True
+        self.sub.injections.option[h.HELICS_HANDLE_OPTION_CONNECTION_OPTIONAL] = True
         self.sub.voltages_imag = self.fed.register_subscription(
             self.inputs["voltages_imag"], ""
         )
         self.sub.voltages_imag.option[h.HELICS_HANDLE_OPTION_IGNORE_INTERRUPTS] = True
+        self.sub.voltages_imag.option[h.HELICS_HANDLE_OPTION_CONNECTION_OPTIONAL] = True
         self.sub.voltages_real = self.fed.register_subscription(
             self.inputs["voltages_real"], ""
         )
         self.sub.voltages_real.option[h.HELICS_HANDLE_OPTION_IGNORE_INTERRUPTS] = True
+        self.sub.voltages_real.option[h.HELICS_HANDLE_OPTION_CONNECTION_OPTIONAL] = True
         self.sub.area_v = self.fed.register_subscription(self.inputs["sub_v"], "")
+        self.sub.area_v.option[h.HELICS_HANDLE_OPTION_CONNECTION_OPTIONAL] = True
         self.sub.area_p = self.fed.register_subscription(self.inputs["sub_p"], "")
+        self.sub.area_p.option[h.HELICS_HANDLE_OPTION_CONNECTION_OPTIONAL] = True
         self.sub.area_q = self.fed.register_subscription(self.inputs["sub_q"], "")
+        self.sub.area_q.option[h.HELICS_HANDLE_OPTION_CONNECTION_OPTIONAL] = True
 
     def register_publication(self) -> None:
         self.pub_pv_set = self.fed.register_publication(
@@ -196,7 +207,7 @@ class OPFFederate:
             "pub_q", h.HELICS_DATA_TYPE_STRING, ""
         )
 
-    def bus_to_branch_power(self, buses: dict) -> dict:
+    def bus_to_branch_power(self, buses: dict[str, float]) -> dict[str, float]:
         branches = {}
         for k, v in buses.items():
             bus, phase = k.split(".", 1)
@@ -205,7 +216,7 @@ class OPFFederate:
                 branches[name] = v
         return branches
 
-    def init_area(self):
+    def init_area(self) -> None:
         topology: Topology = Topology.model_validate(self.sub.topology.json)
         branch_info, bus_info, slack_bus = adapter.extract_info(topology)
         self.admm_config.slack = slack_bus
@@ -297,8 +308,10 @@ class OPFFederate:
         # We use a timezone-naive fallback timestamp (e.g. datetime.now() if not present) for compatibility.
         ids = topology.base_voltage_magnitudes.ids
         mags = topology.base_voltage_magnitudes.values
-        angles_map = dict(zip(topology.base_voltage_angles.ids, topology.base_voltage_angles.values))
-        
+        angles_map = dict(
+            zip(topology.base_voltage_angles.ids, topology.base_voltage_angles.values)
+        )
+
         real_vals = []
         imag_vals = []
         for i, node_id in enumerate(ids):
@@ -307,11 +320,11 @@ class OPFFederate:
             v = mag * np.exp(1j * ang)
             real_vals.append(v.real)
             imag_vals.append(v.imag)
-            
+
         time_val = topology.injections.power_real.time or datetime.now()
         default_v_real = VoltagesReal(ids=ids, values=real_vals, time=time_val)
         default_v_imag = VoltagesImaginary(ids=ids, values=imag_vals, time=time_val)
-        
+
         self.sub.voltages_real.set_default(default_v_real.model_dump_json())
         self.sub.voltages_imag.set_default(default_v_imag.model_dump_json())
         self.sub.injections.set_default(topology.injections.model_dump_json())
@@ -319,11 +332,18 @@ class OPFFederate:
         # Extract nominal PV capacities from topology injections
         # Used later to translate active power kW commands to %Pmpp setpoints
         self.pv_capacities = {}
-        for val, eq_id in zip(topology.injections.power_real.values, topology.injections.power_real.equipment_ids):
+        for val, eq_id in zip(
+            topology.injections.power_real.values,
+            topology.injections.power_real.equipment_ids,
+        ):
             if eq_id.lower().startswith("pvsystem."):
-                self.pv_capacities[eq_id] = self.pv_capacities.get(eq_id, 0.0) + float(val)
+                self.pv_capacities[eq_id] = self.pv_capacities.get(eq_id, 0.0) + float(
+                    val
+                )
 
-    def get_set_points(self, control: dict, bus_info: adapter.BusInfo) -> dict[complex]:
+    def get_set_points(
+        self, control: dict[str, dict], bus_info: adapter.BusInfo
+    ) -> dict[str, complex]:
         setpoints = {}
         for key, val in control.items():
             if key in bus_info.buses:
@@ -335,7 +355,7 @@ class OPFFederate:
                         setpoints[tag] = p + 1j * q
         return setpoints
 
-    def first_pub(self, t):
+    def first_pub(self, t: float) -> None:
         self.area_v = VoltagesMagnitude(ids=[], values=[], time=t)
         self.area_p = PowersReal(ids=[], equipment_ids=[], values=[], time=t)
         self.area_q = PowersImaginary(ids=[], equipment_ids=[], values=[], time=t)
@@ -344,7 +364,7 @@ class OPFFederate:
         self.pub_admm_p.publish(self.area_p.json())
         self.pub_admm_q.publish(self.area_q.json())
 
-    def itr_pub(self):
+    def itr_pub(self) -> None:
         if self.area_graph is None:
             self.init_area()
 
@@ -500,12 +520,16 @@ class OPFFederate:
                     obj_val = p / float(max_pv) * 100.0
                 else:
                     obj_val = 100.0
-                
-                commands.append(Command(obj_name=eq, obj_property="%Pmpp", val=str(obj_val)))
+
+                commands.append(
+                    Command(obj_name=eq, obj_property="%Pmpp", val=str(obj_val))
+                )
                 commands.append(Command(obj_name=eq, obj_property="%Cutout", val="0"))
                 commands.append(Command(obj_name=eq, obj_property="%Cutin", val="0"))
             else:
-                commands.append(Command(obj_name=eq, obj_property="kW", val=str(val.real)))
+                commands.append(
+                    Command(obj_name=eq, obj_property="kW", val=str(val.real))
+                )
 
             commands.append(
                 Command(obj_name=eq, obj_property="kvar", val=str(val.imag))
