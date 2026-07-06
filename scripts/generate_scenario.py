@@ -1,7 +1,12 @@
 import copy
+import csv
 import json
 import os
 
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import networkx as nx
+from matplotlib.lines import Line2D
 from oedisi.componentframework.system_configuration import (
     Component,
     Link,
@@ -23,12 +28,190 @@ NAME = ""
 OUTPUTS = ""
 SCENARIOS = ""
 
+SMART_DS = {
+    "SFO/P1U": "p1uhs0_1247/p1uhs0_1247--p1udt942",
+}
 
 T_STEPS = 1
 DELTA_T = 60 * 60  # minutes * seconds per hour
 
 
-def generate_feeder(OUTPUTS: str) -> Component:
+def parse_model_dir(model_dir: str) -> tuple[str, str]:
+    parts = model_dir.split("-")
+    if len(parts) >= 2:
+        level = parts[-1]
+        model_part = "-".join(parts[:-1])  # "sfo-p1u"
+        model_parts = model_part.split("-")
+        model = "/".join([mp.upper() for mp in model_parts])  # "SFO/P1U"
+        return model, level
+    return "", ""
+
+
+def load_coordinates(coords_dir: str) -> dict[str, tuple[float, float]]:
+    for filename in ["Buscoords.dat", "Buscoords.dss"]:
+        path = os.path.join(coords_dir, filename)
+        if os.path.exists(path):
+            coords = {}
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("//") or line.startswith("!"):
+                        continue
+                    if "," in line:
+                        parts = [p.strip() for p in line.split(",")]
+                    else:
+                        parts = line.split()
+                    if len(parts) >= 3:
+                        bus = parts[0].strip("'\"")
+                        try:
+                            x = float(parts[1])
+                            y = float(parts[2])
+                            coords[bus] = (x, y)
+                        except ValueError:
+                            pass
+            if coords:
+                return coords
+    return {}
+
+
+def plot_network(
+    G: nx.Graph,
+    boundaries: list,
+    areas_clean: list[nx.Graph],
+    slack_bus: str,
+    coords_dir: str,
+    output_path: str,
+) -> None:
+    plt.figure(figsize=(12, 10))
+
+    coords = load_coordinates(coords_dir)
+    if coords:
+        coords_upper = {k.upper(): v for k, v in coords.items()}
+        pos = {
+            node: coords_upper[node.upper()]
+            for node in G.nodes()
+            if node.upper() in coords_upper
+        }
+        missing_nodes = [n for n in G.nodes() if n not in pos]
+        if missing_nodes:
+            if len(pos) > 0:
+                temp_pos = nx.spring_layout(G, pos=pos, fixed=list(pos.keys()), seed=42)
+                pos.update({n: temp_pos[n] for n in missing_nodes})
+            else:
+                pos = nx.kamada_kawai_layout(G)
+    else:
+        pos = nx.kamada_kawai_layout(G)
+
+    node_to_area = {}
+    for idx, area in enumerate(areas_clean):
+        for node in area.nodes():
+            node_to_area[node] = idx
+
+    colors = [
+        "#1f77b4",
+        "#ff7f0e",
+        "#2ca02c",
+        "#d62728",
+        "#9467bd",
+        "#8c564b",
+        "#e377c2",
+        "#7f7f7f",
+        "#bcbd22",
+        "#17becf",
+    ]
+    node_colors = [colors[node_to_area[node] % len(colors)] for node in G.nodes()]
+
+    nx.draw_networkx_edges(G, pos, edge_color="lightgray", width=1.5)
+    nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=50)
+
+    y_vals = [p[1] for p in pos.values()]
+    y_range = max(y_vals) - min(y_vals) if y_vals else 1.0
+    offset_y = y_range * 0.02
+
+    for u, v, a in boundaries:
+        if u in pos and v in pos:
+            mid_x = (pos[u][0] + pos[v][0]) / 2.0
+            mid_y = (pos[u][1] + pos[v][1]) / 2.0
+            plt.plot(
+                mid_x,
+                mid_y,
+                marker="s",
+                color="red",
+                markersize=8,
+                markeredgecolor="black",
+                zorder=5,
+            )
+            plt.text(
+                mid_x,
+                mid_y + offset_y,
+                a["id"],
+                color="darkred",
+                fontsize=8,
+                weight="bold",
+                ha="center",
+                bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
+            )
+
+    if slack_bus in G.nodes():
+        nx.draw_networkx_nodes(
+            G,
+            pos,
+            nodelist=[slack_bus],
+            node_shape="*",
+            node_color="gold",
+            node_size=200,
+            edgecolors="black",
+        )
+
+    legend_elements = []
+    for idx, area in enumerate(areas_clean):
+        color = colors[idx % len(colors)]
+        num_nodes = area.number_of_nodes()
+        legend_elements.append(
+            mpatches.Patch(color=color, label=f"Area {idx} ({num_nodes} nodes)")
+        )
+    legend_elements.append(
+        Line2D(
+            [0],
+            [0],
+            marker="s",
+            color="w",
+            markerfacecolor="red",
+            markeredgecolor="black",
+            markersize=8,
+            label="Boundary Switch Location",
+        )
+    )
+    if slack_bus in G.nodes():
+        legend_elements.append(
+            Line2D(
+                [0],
+                [0],
+                marker="*",
+                color="w",
+                markerfacecolor="gold",
+                markeredgecolor="black",
+                markersize=12,
+                label="Slack Bus",
+            )
+        )
+
+    plt.legend(handles=legend_elements, loc="best", fontsize=9, framealpha=0.9)
+    model_name = (
+        os.path.basename(output_path).replace(f"{ALGO}_", "").replace(".png", "")
+    )
+    plt.title(
+        f"{model_name.upper()} Distribution Grid ADMM Area Partition",
+        fontsize=14,
+        fontweight="bold",
+    )
+    plt.axis("off")
+
+    plt.savefig(output_path, dpi=400, bbox_inches="tight")
+    plt.close()
+
+
+def generate_feeder_ieee(OUTPUTS: str) -> Component:
     smart_ds = False
     base = "gadal_ieee123"
     profiles = f"{base}/profiles"
@@ -53,6 +236,41 @@ def generate_feeder(OUTPUTS: str) -> Component:
             "buscoords_output": f"{OUTPUTS}/Buscoords.dat",
         },
     )
+
+
+def generate_feeder_smartds(MODEL: str, LEVEL: str, OUTPUTS: str) -> Component:
+    smart_ds = True
+    base = f"SMART-DS/v1.0/2018/{MODEL}"
+    scenario = f"scenarios/solar_{LEVEL}_batteries_none_timeseries"
+    profiles = f"{base}/profiles"
+    opendss = f"{base}/{scenario}/opendss/{SMART_DS[MODEL]}"
+    file = "opendss/Master.dss"
+
+    return Component(
+        name="feeder",
+        type="Feeder",
+        host="feeder",
+        container_port=5600,
+        parameters={
+            "use_smartds": smart_ds,
+            "use_sparse_admittance": True,
+            "profile_location": profiles,
+            "opendss_location": opendss,
+            "feeder_file": file,
+            "start_date": "2018-05-01 00:00:00",
+            "number_of_timesteps": T_STEPS,
+            "run_freq_sec": DELTA_T,
+            "topology_output": f"{OUTPUTS}/topology.json",
+            "buscoords_output": f"{OUTPUTS}/Buscoords.dat",
+        },
+    )
+
+
+def generate_feeder(MODEL: str, LEVEL: str, OUTPUTS: str) -> Component:
+    if "ieee" in MODEL.lower():
+        return generate_feeder_ieee(OUTPUTS)
+    else:
+        return generate_feeder_smartds(MODEL, LEVEL, OUTPUTS)
 
 
 def generate_recorder(port: str, src: str, OUTPUTS: str) -> tuple[Component, Link]:
@@ -251,26 +469,6 @@ def link_algo(system: WiringDiagram, algo: Component, feeder: Component) -> None
         Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
     )
 
-    #    port = "voltage_mag"
-    #    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    #    system.components.append(component)
-    #    system.links.append(link)
-    #
-    #    port = "voltage_angle"
-    #    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    #    system.components.append(component)
-    #    system.links.append(link)
-    #
-    #    port = "power_mag"
-    #    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    #    system.components.append(component)
-    #    system.links.append(link)
-    #
-    #    port = "power_angle"
-    #    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    #    system.components.append(component)
-    #    system.links.append(link)
-
     port = "solver_stats"
     component, link = generate_recorder(port, algo.name, OUTPUTS)
     system.components.append(component)
@@ -287,30 +485,33 @@ def link_algo(system: WiringDiagram, algo: Component, feeder: Component) -> None
     )
 
 
-def generate() -> None:
-    global OUTPUTS
-    TOPOLOGY = f"{ROOT}/scenarios/ieee123/topology.json"
-    OUTPUTS = "../../outputs"
-    SCENARIOS = f"{ROOT}/scenarios"
-    os.makedirs(SCENARIOS, exist_ok=True)
-
-    topology = get_topology(TOPOLOGY)
+def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> None:
+    topology = get_topology(topology_path)
     slack_bus, _ = topology.slack_bus[0].split(".", 1)
 
     if topology.incidences is None:
-        print("topology must have incidences")
-        exit(1)
+        print(f"topology in {model_dir} must have incidences")
+        return
 
     G = generate_graph(topology.incidences, slack_bus)
-    print("Total: ", G)
+    print(f"Total graph for {model_dir}: ", G)
     graph = copy.deepcopy(G)
     graph2 = copy.deepcopy(G)
     boundaries = area_disconnects(graph)
-    areas = disconnect_areas(graph2, boundaries)
-    areas = reconnect_area_switches(areas, boundaries)
+    areas_clean = disconnect_areas(graph2, boundaries)
+    areas = reconnect_area_switches(copy.deepcopy(areas_clean), boundaries)
 
-    system = WiringDiagram(name=f"{ALGO}_ieee123", components=[], links=[])
-    feeder = generate_feeder(OUTPUTS)
+    system = WiringDiagram(name=f"{ALGO}_{model_dir}", components=[], links=[])
+
+    if "ieee" in model_dir.lower():
+        feeder = generate_feeder("ieee123", "", OUTPUTS)
+    else:
+        model, level = parse_model_dir(model_dir)
+        if not model:
+            print(f"Skipping SMART-DS generation for unrecognized folder: {model_dir}")
+            return
+        feeder = generate_feeder(model, level, OUTPUTS)
+
     system.components.append(feeder)
 
     link_feeder(system, feeder)
@@ -330,7 +531,6 @@ def generate() -> None:
             source_bus_map[i] = slack_bus
             source_line_map[i] = ""
         else:
-
             su, sv, sa = get_area_source(G, slack_bus, src)
             source_bus_map[i] = su
             source_line_map[i] = sa["id"]
@@ -355,7 +555,6 @@ def generate() -> None:
         parameters={
             "name": "hub_voltage",
             "max_itr": max_itr,
-            "t_steps": T_STEPS,
         },
     )
     system.components.append(hub_voltage)
@@ -367,8 +566,6 @@ def generate() -> None:
         container_port=None,
         parameters={
             "max_itr": max_itr,
-            "number_of_timesteps": T_STEPS,
-            "deltat": DELTA_T,
         },
     )
     system.components.append(hub_power)
@@ -380,8 +577,6 @@ def generate() -> None:
         container_port=None,
         parameters={
             "max_itr": max_itr,
-            "number_of_timesteps": T_STEPS,
-            "deltat": DELTA_T,
         },
     )
     system.components.append(hub_control)
@@ -416,8 +611,6 @@ def generate() -> None:
                 "vup_tol": 0.01,
                 "sdn_tol": 0.01,
                 "max_itr": max_itr,
-                "t_steps": T_STEPS,
-                "deltat": DELTA_T,
                 "relaxed": False,
                 "control_type": "real",
                 "switches": switch_map[k],
@@ -438,6 +631,15 @@ def generate() -> None:
     with open(f"{SCENARIOS}/{system.name}.json") as f:
         check = WiringDiagram.model_validate_json(f.read())
 
+    plot_network(
+        G,
+        boundaries,
+        areas_clean,
+        slack_bus,
+        f"{SCENARIOS}/{model_dir}",
+        f"{SCENARIOS}/{system.name}.png",
+    )
+
     components = {}
     for c in system.components:
         name = c.name
@@ -454,6 +656,22 @@ def generate() -> None:
         f.write(json.dumps(components))
 
 
+def generate() -> None:
+    global OUTPUTS
+    OUTPUTS = "../../outputs"
+    SCENARIOS = f"{ROOT}/scenarios"
+    os.makedirs(SCENARIOS, exist_ok=True)
+
+    for item in os.listdir(SCENARIOS):
+        dir_path = os.path.join(SCENARIOS, item)
+        if not os.path.isdir(dir_path):
+            continue
+        topology_path = os.path.join(dir_path, "topology.json")
+        if not os.path.exists(topology_path):
+            continue
+        generate_for_model(item, topology_path, SCENARIOS)
+
+
 def get_topology(path: str) -> Topology:
     assert os.path.exists(path), "need to generate topology from base scenario"
 
@@ -464,5 +682,5 @@ def get_topology(path: str) -> Topology:
 
 
 if __name__ == "__main__":
-    print("generating: IEEE 123 ADMM")
+    print("generating ADMM scenarios...")
     generate()
