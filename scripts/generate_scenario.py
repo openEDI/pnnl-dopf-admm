@@ -332,22 +332,22 @@ def generate_sensor(port: str, src: str) -> tuple[Component, Link]:
 
 
 def link_feeder(system: WiringDiagram, feeder: Component) -> None:
-    port = "voltage_real"
+    port = "voltages_real"
     component, link = generate_recorder(port, feeder.name, OUTPUTS)
     system.components.append(component)
     system.links.append(link)
 
-    port = "voltage_imag"
+    port = "voltages_imag"
     component, link = generate_recorder(port, feeder.name, OUTPUTS)
     system.components.append(component)
     system.links.append(link)
 
-    port = "power_real"
+    port = "powers_real"
     component, link = generate_recorder(port, feeder.name, OUTPUTS)
     system.components.append(component)
     system.links.append(link)
 
-    port = "power_imag"
+    port = "powers_imag"
     component, link = generate_recorder(port, feeder.name, OUTPUTS)
     system.components.append(component)
     system.links.append(link)
@@ -357,7 +357,7 @@ def link_feeder_voltage(system: WiringDiagram, feeder: Component, src: int) -> N
     system.links.append(
         Link(
             source=f"{feeder.name}",
-            source_port="voltage_real",
+            source_port="voltages_real",
             target=f"{ALGO}_{src}",
             target_port="sub_v",
         )
@@ -368,7 +368,7 @@ def link_feeder_power(system: WiringDiagram, feeder: Component, src: int) -> Non
     system.links.append(
         Link(
             source=f"{feeder.name}",
-            source_port="power_real",
+            source_port="powers_real",
             target=f"{ALGO}_{src}",
             target_port="sub_p",
         )
@@ -376,7 +376,7 @@ def link_feeder_power(system: WiringDiagram, feeder: Component, src: int) -> Non
     system.links.append(
         Link(
             source=f"{feeder.name}",
-            source_port="power_imag",
+            source_port="powers_imag",
             target=f"{ALGO}_{src}",
             target_port="sub_q",
         )
@@ -449,22 +449,12 @@ def link_hub_control(system: WiringDiagram, hub: Component, src: int) -> None:
 
 
 def link_algo(system: WiringDiagram, algo: Component, feeder: Component) -> None:
-    port = "voltage_real"
+    port = "voltages_real"
     system.links.append(
         Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
     )
 
-    port = "voltage_imag"
-    system.links.append(
-        Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
-    )
-
-    port = "power_real"
-    system.links.append(
-        Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
-    )
-
-    port = "power_imag"
+    port = "voltages_imag"
     system.links.append(
         Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
     )
@@ -549,7 +539,7 @@ def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> No
     max_itr = 10
     hub_voltage = Component(
         name="hub_voltage",
-        type="VoltageHub",
+        type="HubVoltageComponent",
         host="hub_voltage",
         container_port=None,
         parameters={
@@ -561,7 +551,7 @@ def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> No
 
     hub_power = Component(
         name="hub_power",
-        type="PowerHub",
+        type="HubPowerComponent",
         host="hub_voltage",
         container_port=None,
         parameters={
@@ -572,7 +562,7 @@ def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> No
 
     hub_control = Component(
         name="hub_control",
-        type="ControlHub",
+        type="HubControlComponent",
         host="hub_control",
         container_port=None,
         parameters={
@@ -581,20 +571,17 @@ def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> No
     )
     system.components.append(hub_control)
 
-    port = "pv_set"
     system.links.append(
         Link(
             source=hub_control.name,
-            source_port=port,
+            source_port="pub_c",
             target=feeder.name,
-            target_port=port,
+            target_port="change_commands",
         )
     )
 
     for k, v in sub_areas.items():
         print(k, v)
-        link_feeder_voltage(system, feeder, k)
-        link_feeder_power(system, feeder, k)
         link_hub_control(system, hub_control, k)
         link_hub_power(system, hub_power, k)
         link_hub_voltage(system, hub_voltage, k)
@@ -604,7 +591,7 @@ def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> No
     for k, v in sub_areas.items():
         algo = Component(
             name=f"{ALGO}_{k}",
-            type="OptimalPowerFlow",
+            type="DOPFADMMComponent",
             host=f"admm_{k}",
             container_port=None,
             parameters={
