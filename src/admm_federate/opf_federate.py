@@ -54,7 +54,7 @@ def xarray_to_voltages_pol(
 
 class ComponentParameters(BaseModel):
     name: str
-    t_steps: int
+    t_steps: int = 1
     max_itr: int
     control_type: str
     switches: list[str]
@@ -125,7 +125,7 @@ class OPFFederate:
             config = json.load(file)
 
         self.static = ComponentParameters.model_validate(config)
-        self.deltat = config["deltat"]
+        self.deltat = config.get("deltat", 1.0)
 
         self.admm_config = lindistflow.ADMMConfig()
         self.admm_config.relaxed = self.static.relaxed
@@ -150,7 +150,7 @@ class OPFFederate:
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
         # h.helicsFederateSetFlagOption(self.fed, h.helics_flag_slow_responding, True)
         h.helicsFederateSetTimeProperty(
-            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, self.deltat
+            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1.0
         )
 
         # h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_OFFSET, 0.1)
@@ -607,10 +607,10 @@ class OPFFederate:
                 h.helicsFederateGetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD)
             )
 
-            granted_time = 0
+            granted_time = 0.0
             logger.debug("Step 0: Starting Time/Iter loop")
-            while granted_time < self.static.t_steps * self.deltat:
-                request_time = granted_time + update_interval
+            while True:
+                request_time = granted_time + 1.0
                 logger.debug("Step 1: published initial values for iteration")
                 itr_flag = itr_need
                 self.first_pub(granted_time)
@@ -626,6 +626,15 @@ class OPFFederate:
 
                     if granted_time >= h.HELICS_TIME_MAXTIME:
                         logger.info("HELICS Max Time reached. Exiting loop.")
+                        break
+
+                    if (
+                        granted_time > 0.0
+                        and self.itr == 0
+                        and not self.sub.voltages_real.is_updated()
+                    ):
+                        logger.info("Feeder disconnected. Exiting loop.")
+                        granted_time = h.HELICS_TIME_MAXTIME
                         break
 
                     if itr_status == h.helics_iteration_result_error:

@@ -933,18 +933,27 @@ def optimal_power_flow(
         [A_ineq @ x <= b_ineq, A_eq @ x == b_eq],
     )
 
-    prob.solve(solver=cp.CLARABEL, verbose=False)
+    prob.solve(solver=cp.OSQP, verbose=False)
     extra_stats = prob.solver_stats.extra_stats
-    if extra_stats is None:
-        extra_stats = {}
 
-    opt_gap = 0
-    if "info" in extra_stats.keys() and "gap" in extra_stats.keys():
-        opt_gap = prob.solver_stats.extra_stats["info"]["gap"]
-
-    fea_gap = 0
-    if "info" in extra_stats.keys() and "pres" in extra_stats.keys():
-        fea_gap = prob.solver_stats.extra_stats["info"]["pres"]
+    opt_gap = 0.0
+    fea_gap = 0.0
+    if extra_stats is not None:
+        # Check if extra_stats is a namespace (e.g., OSQP)
+        if hasattr(extra_stats, "info"):
+            info = getattr(extra_stats, "info", None)
+            if info is not None:
+                opt_gap = getattr(info, "duality_gap", getattr(info, "gap", 0.0))
+                fea_gap = getattr(info, "prim_res", getattr(info, "pres", getattr(info, "res_primal", getattr(info, "res_pri", 0.0))))
+        # Check if extra_stats is a dictionary (e.g., SCS, ECOS, etc.)
+        elif isinstance(extra_stats, dict):
+            info = extra_stats.get("info")
+            if isinstance(info, dict):
+                opt_gap = info.get("gap", 0.0)
+                fea_gap = info.get("pres", info.get("res_primal", info.get("res_pri", 0.0)))
+            else:
+                opt_gap = extra_stats.get("gap", 0.0)
+                fea_gap = extra_stats.get("pres", extra_stats.get("res_primal", extra_stats.get("res_pri", 0.0)))
 
     stats = {
         "solve_time": prob.solver_stats.solve_time,
