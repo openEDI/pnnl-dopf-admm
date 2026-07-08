@@ -1,6 +1,6 @@
 {
     "directory": "admm_federate",
-    "execute_function": "python opf_federate.py",
+    "execute_function": "python -m src/admm_federate/opf_federate.py",
     "static_inputs": [
         {
             "type": "",
