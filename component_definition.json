@@ -77,7 +77,7 @@
             "port_id": "topology"
         },
         {
-            "type": "Injections",
+            "type": "Injection",
             "port_id": "injections"
         },
         {

@@ -475,7 +475,9 @@ def link_algo(system: WiringDiagram, algo: Component, feeder: Component) -> None
     )
 
 
-def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> None:
+def generate_for_model(
+    model_dir: str, topology_path: str, SCENARIOS: str, num_areas: int = 5
+) -> None:
     topology = get_topology(topology_path)
     slack_bus, _ = topology.slack_bus[0].split(".", 1)
 
@@ -487,11 +489,11 @@ def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> No
     print(f"Total graph for {model_dir}: ", G)
     graph = copy.deepcopy(G)
     graph2 = copy.deepcopy(G)
-    boundaries = area_disconnects(graph)
+    boundaries = area_disconnects(graph, n_max=num_areas)
     areas_clean = disconnect_areas(graph2, boundaries)
     areas = reconnect_area_switches(copy.deepcopy(areas_clean), boundaries)
 
-    system = WiringDiagram(name=f"{ALGO}_{model_dir}", components=[], links=[])
+    system = WiringDiagram(name=f"{ALGO}_{model_dir}_{num_areas}", components=[], links=[])
 
     if "ieee" in model_dir.lower():
         feeder = generate_feeder("ieee123", "", OUTPUTS)
@@ -643,7 +645,7 @@ def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str) -> No
         f.write(json.dumps(components))
 
 
-def generate() -> None:
+def generate(num_areas: int = 5) -> None:
     global OUTPUTS
     OUTPUTS = "../../outputs"
     SCENARIOS = f"{ROOT}/scenarios"
@@ -656,7 +658,7 @@ def generate() -> None:
         topology_path = os.path.join(dir_path, "topology.json")
         if not os.path.exists(topology_path):
             continue
-        generate_for_model(item, topology_path, SCENARIOS)
+        generate_for_model(item, topology_path, SCENARIOS, num_areas)
 
 
 def get_topology(path: str) -> Topology:
@@ -669,5 +671,16 @@ def get_topology(path: str) -> Topology:
 
 
 if __name__ == "__main__":
-    print("generating ADMM scenarios...")
-    generate()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Generate ADMM scenarios.")
+    parser.add_argument(
+        "--num-areas",
+        type=int,
+        default=5,
+        choices=range(1, 6),
+        help="Number of areas to split the network into (1 to 5, default: 5)",
+    )
+    args = parser.parse_args()
+    print(f"generating ADMM scenarios with {args.num_areas} areas...")
+    generate(num_areas=args.num_areas)

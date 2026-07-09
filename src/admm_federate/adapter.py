@@ -597,29 +597,31 @@ def get_switches(graph: nx.Graph):
     return switches
 
 
-def area_disconnects(graph: nx.Graph):
-    n_max = 5
+def area_disconnects(graph: nx.Graph, n_max: int = 5) -> list:
     switches = get_switches(graph)
-    areas = disconnect_areas(graph, switches)
-    area_cnt = [area.number_of_nodes() for area in areas]
-    min_n = [area.number_of_nodes() for area in areas]
-    min_n.sort(reverse=True)
-    min_n = min(min_n[0:n_max])
-    z_area = zip(area_cnt, areas)
-    z_area = sorted(z_area, key=lambda v: v[0])
+    if not switches:
+        return []
 
-    closed = []
-    cnt = 0
-    for n, area in z_area:
-        if n < 2 or n < min_n or cnt > n_max:
-            for u, v, a in switches:
-                if area.has_node(u) or area.has_node(v):
-                    closed.append((u, v, a))
-            continue
-        cnt += 1
+    switch_weights = []
+    for u, v, a in switches:
+        temp_graph = graph.copy()
+        temp_graph.remove_edge(u, v)
+        components = list(nx.connected_components(temp_graph))
+        if len(components) >= 2:
+            sizes = [len(c) for c in components]
+            min_size = min(sizes)
+        else:
+            min_size = 0
+        switch_weights.append((min_size, (u, v, a)))
 
-    open = [(u, v, a) for u, v, a in switches if (u, v, a) not in closed]
-    return open
+    switch_weights.sort(key=lambda x: x[0], reverse=True)
+
+    n_open = min(n_max - 1, len(switches))
+    if n_open <= 0:
+        return []
+
+    open_sw = [sw for _, sw in switch_weights[:n_open]]
+    return open_sw
 
 
 def reconnect_area_switches(areas: list[nx.Graph], switches):
@@ -869,6 +871,9 @@ def generate_area_info(
             switches.append(a["id"])
 
     if sorted(switches) != sorted(boundary):
+        return None, None
+
+    if slack_bus not in graph:
         return None, None
 
     branch_info = BranchInfo()

@@ -62,3 +62,24 @@ def test_load_static_inputs(tmp_path) -> None:
             assert fed.deltat == 3600
             assert fed.admm_config.rho_vup == 1000.0
             assert fed.admm_config.relaxed is False
+
+
+def test_generate_area_info_missing_slack_bus() -> None:
+    import networkx as nx
+    from oedisi.types.data_types import Topology
+    import adapter
+
+    # Create a simple graph that does not contain slack bus "150"
+    graph = nx.Graph()
+    graph.add_edge("1", "2", id="sw2", tag="SWITCH", name="1_2")
+
+    # Mock topology
+    topology = MagicMock()
+
+    # Call generate_area_info with a slack_bus that is not in the graph
+    # Boundary ids match the edge to prevent early return on boundary check
+    res_branch, res_bus = adapter.generate_area_info(graph, topology, slack_bus="150", boundary=["sw2"])
+
+    # Should return None, None instead of crashing with NodeNotFound
+    assert res_branch is None
+    assert res_bus is None
