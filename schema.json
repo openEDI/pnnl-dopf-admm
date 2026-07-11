@@ -1,81 +1,111 @@
 {
-  "title": "ComponentParameters",
-  "type": "object",
+  "description": "Static configuration parameters defining schema.",
   "properties": {
     "name": {
+      "description": "Unique identifier for the federate name",
       "title": "Name",
       "type": "string"
     },
+    "deltat": {
+      "default": 1.0,
+      "description": "Co-simulation time step interval in seconds",
+      "minimum": 0.0,
+      "title": "Time Step (s)",
+      "type": "number"
+    },
     "t_steps": {
+      "default": 1,
+      "description": "Number of time steps to run",
+      "minimum": 1,
       "title": "T Steps",
       "type": "integer"
     },
     "max_itr": {
+      "default": 10,
+      "description": "Maximum number of ADMM iterations per step",
+      "minimum": 1,
       "title": "Max Itr",
       "type": "integer"
     },
     "control_type": {
+      "description": "Control mode (e.g. 'real', 'reactive')",
       "title": "Control Type",
       "type": "string"
     },
     "switches": {
-      "title": "Switches",
-      "type": "array",
+      "description": "List of switches/controllable lines in the area",
       "items": {
         "type": "string"
-      }
+      },
+      "title": "Switches",
+      "type": "array"
     },
     "source_bus": {
+      "description": "ID of the boundary/source bus",
       "title": "Source Bus",
       "type": "string"
     },
     "source_line": {
+      "description": "ID of the boundary/source line",
       "title": "Source Line",
       "type": "string"
     },
     "relaxed": {
+      "default": false,
+      "description": "Boolean flag to enable relaxed model formulation",
       "title": "Relaxed",
       "type": "boolean"
     },
     "rho_sup": {
+      "description": "ADMM penalty parameter for active power injection",
+      "minimum": 0.0,
       "title": "Rho Sup",
       "type": "number"
     },
     "rho_vup": {
+      "description": "ADMM penalty parameter for upstream voltage",
+      "minimum": 0.0,
       "title": "Rho Vup",
       "type": "number"
     },
     "rho_sdn": {
+      "description": "ADMM penalty parameter for active/reactive power flow discrepancy",
+      "minimum": 0.0,
       "title": "Rho Sdn",
       "type": "number"
     },
     "rho_vdn": {
+      "description": "ADMM penalty parameter for downstream voltage discrepancy",
+      "minimum": 0.0,
       "title": "Rho Vdn",
       "type": "number"
     },
     "vup_tol": {
+      "description": "Convergence tolerance for upstream voltage mismatch",
+      "minimum": 0.0,
       "title": "Vup Tol",
       "type": "number"
     },
     "sdn_tol": {
+      "description": "Convergence tolerance for power mismatch",
+      "minimum": 0.0,
       "title": "Sdn Tol",
       "type": "number"
     }
   },
   "required": [
     "name",
-    "t_steps",
-    "max_itr",
     "control_type",
     "switches",
     "source_bus",
     "source_line",
-    "relaxed",
     "rho_sup",
     "rho_vup",
     "rho_sdn",
     "rho_vdn",
     "vup_tol",
     "sdn_tol"
-  ]
+  ],
+  "title": "ADMMConfig",
+  "type": "object"
 }

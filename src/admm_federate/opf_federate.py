@@ -24,7 +24,7 @@ from oedisi.types.data_types import (
     VoltagesMagnitude,
     VoltagesReal,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from admm_federate import adapter, lindistflow
 
@@ -53,20 +53,77 @@ def xarray_to_voltages_pol(
 
 
 class ComponentParameters(BaseModel):
-    name: str
-    t_steps: int = 1
-    max_itr: int
-    control_type: str
-    switches: list[str]
-    source_bus: str
-    source_line: str
-    relaxed: bool
-    rho_sup: float
-    rho_vup: float
-    rho_sdn: float
-    rho_vdn: float
-    vup_tol: float
-    sdn_tol: float
+    """Static configuration parameters defining schema."""
+
+    name: str = Field(
+        title="Name", description="Unique identifier for the federate name"
+    )
+    deltat: float = Field(
+        default=1.0,
+        ge=0.0,
+        title="Time Step (s)",
+        description="Co-simulation time step interval in seconds",
+    )
+    t_steps: int = Field(
+        default=1, ge=1, title="T Steps", description="Number of time steps to run"
+    )
+    max_itr: int = Field(
+        default=10,
+        ge=1,
+        title="Max Itr",
+        description="Maximum number of ADMM iterations per step",
+    )
+    control_type: str = Field(
+        title="Control Type",
+        description="Control mode (e.g. 'real', 'reactive')",
+    )
+    switches: list[str] = Field(
+        title="Switches", description="List of switches/controllable lines in the area"
+    )
+    source_bus: str = Field(
+        title="Source Bus", description="ID of the boundary/source bus"
+    )
+    source_line: str = Field(
+        title="Source Line", description="ID of the boundary/source line"
+    )
+    relaxed: bool = Field(
+        default=False,
+        title="Relaxed",
+        description="Boolean flag to enable relaxed model formulation",
+    )
+    rho_sup: float = Field(
+        ge=0.0,
+        title="Rho Sup",
+        description="ADMM penalty parameter for active power injection",
+    )
+    rho_vup: float = Field(
+        ge=0.0,
+        title="Rho Vup",
+        description="ADMM penalty parameter for upstream voltage",
+    )
+    rho_sdn: float = Field(
+        ge=0.0,
+        title="Rho Sdn",
+        description="ADMM penalty parameter for active/reactive power flow discrepancy",
+    )
+    rho_vdn: float = Field(
+        ge=0.0,
+        title="Rho Vdn",
+        description="ADMM penalty parameter for downstream voltage discrepancy",
+    )
+    vup_tol: float = Field(
+        ge=0.0,
+        title="Vup Tol",
+        description="Convergence tolerance for upstream voltage mismatch",
+    )
+    sdn_tol: float = Field(
+        ge=0.0, title="Sdn Tol", description="Convergence tolerance for power mismatch"
+    )
+
+    model_config = {
+        "title": "ADMMConfig",
+        "description": "Configuration for the ADMM OPF federate.",
+    }
 
 
 class Subscriptions:
@@ -125,7 +182,7 @@ class OPFFederate:
             config = json.load(file)
 
         self.static = ComponentParameters.model_validate(config)
-        self.deltat = config.get("deltat", 1.0)
+        self.deltat = self.static.deltat
 
         self.admm_config = lindistflow.ADMMConfig()
         self.admm_config.relaxed = self.static.relaxed
@@ -149,9 +206,7 @@ class OPFFederate:
 
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
         # h.helicsFederateSetFlagOption(self.fed, h.helics_flag_slow_responding, True)
-        h.helicsFederateSetTimeProperty(
-            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1.0
-        )
+        h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD, 1.0)
 
         # h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_OFFSET, 0.1)
         # h.helicsFederateSetFlagOption(self.fed, h.HELICS_FLAG_UNINTERRUPTIBLE, True)
