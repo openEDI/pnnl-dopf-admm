@@ -6,7 +6,7 @@ from enum import Enum
 import cvxpy as cp
 import numpy as np
 
-from admm_federate.adapter import BranchInfo, BusInfo, branch_distance
+from .adapter import BranchInfo, BusInfo, branch_distance
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())

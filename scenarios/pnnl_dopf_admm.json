@@ -91,7 +91,6 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000,
-        "t_steps": 24,
         "source_bus": "150",
         "source_line": ""
       }
@@ -125,7 +124,6 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000,
-        "t_steps": 24,
         "source_bus": "18",
         "source_line": "sw3"
       }
@@ -160,7 +158,6 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000,
-        "t_steps": 24,
         "source_bus": "13",
         "source_line": "sw2"
       }
@@ -195,7 +192,6 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000,
-        "t_steps": 24,
         "source_bus": "60",
         "source_line": "sw4"
       }
@@ -229,7 +225,6 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000,
-        "t_steps": 24,
         "source_bus": "97",
         "source_line": "sw5"
       }

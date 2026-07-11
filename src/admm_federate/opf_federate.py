@@ -26,7 +26,7 @@ from oedisi.types.data_types import (
 )
 from pydantic import BaseModel, Field
 
-from admm_federate import adapter, lindistflow
+from . import adapter, lindistflow
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
@@ -63,9 +63,6 @@ class ComponentParameters(BaseModel):
         ge=0.0,
         title="Time Step (s)",
         description="Co-simulation time step interval in seconds",
-    )
-    t_steps: int = Field(
-        default=1, ge=1, title="T Steps", description="Number of time steps to run"
     )
     max_itr: int = Field(
         default=10,

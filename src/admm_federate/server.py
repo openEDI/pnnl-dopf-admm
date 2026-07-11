@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from oedisi.componentframework.system_configuration import ComponentStruct
 from oedisi.types.common import BrokerConfig, DefaultFileNames, HeathCheck, ServerReply
 
-from admm_federate.opf_federate import run_simulator
+from .opf_federate import run_simulator
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
