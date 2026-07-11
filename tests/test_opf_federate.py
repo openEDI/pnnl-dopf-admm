@@ -4,9 +4,9 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 # Import module directly from source tree to avoid heavy package side effects.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "admm_federate"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from opf_federate import ComponentParameters, OPFFederate  # noqa: E402
+from admm_federate.opf_federate import ComponentParameters, OPFFederate  # noqa: E402
 
 
 def test_load_static_inputs(tmp_path) -> None:
@@ -15,7 +15,6 @@ def test_load_static_inputs(tmp_path) -> None:
         "vup_tol": 0.01,
         "sdn_tol": 0.01,
         "max_itr": 10,
-        "t_steps": 24,
         "deltat": 3600,
         "relaxed": False,
         "control_type": "real",
@@ -53,7 +52,6 @@ def test_load_static_inputs(tmp_path) -> None:
             # Assertions on loaded parameters
             assert isinstance(fed.static, ComponentParameters)
             assert fed.static.name == "test_admm"
-            assert fed.static.t_steps == 24
             assert fed.static.source_bus == "150"
             assert fed.static.source_line == ""
             assert fed.deltat == 3600
@@ -62,8 +60,9 @@ def test_load_static_inputs(tmp_path) -> None:
 
 
 def test_generate_area_info_missing_slack_bus() -> None:
-    import adapter
     import networkx as nx
+
+    from admm_federate import adapter
 
     # Create a simple graph that does not contain slack bus "150"
     graph = nx.Graph()

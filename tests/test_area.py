@@ -2,9 +2,13 @@ import sys
 from pathlib import Path
 
 # Import module directly from source tree to avoid heavy package side effects.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "admm_federate"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from area import area_info, check_network_radiality, graph_process  # noqa: E402
+from admm_federate.area import (  # noqa: E402
+    area_info,
+    check_network_radiality,
+    graph_process,
+)
 
 
 def test_check_network_radiality_true_for_tree() -> None:
