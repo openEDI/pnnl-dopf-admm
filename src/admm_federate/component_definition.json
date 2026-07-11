@@ -12,10 +12,6 @@
         },
         {
             "type": "",
-            "port_id": "t_steps"
-        },
-        {
-            "type": "",
             "port_id": "max_itr"
         },
         {

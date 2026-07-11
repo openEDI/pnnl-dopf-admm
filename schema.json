@@ -13,13 +13,6 @@
       "title": "Time Step (s)",
       "type": "number"
     },
-    "t_steps": {
-      "default": 1,
-      "description": "Number of time steps to run",
-      "minimum": 1,
-      "title": "T Steps",
-      "type": "integer"
-    },
     "max_itr": {
       "default": 10,
       "description": "Maximum number of ADMM iterations per step",
