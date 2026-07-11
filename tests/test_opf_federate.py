@@ -3,8 +3,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # Import module directly from source tree to avoid heavy package side effects.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "admm_federate"))
 
@@ -49,7 +47,6 @@ def test_load_static_inputs(tmp_path) -> None:
             patch.object(OPFFederate, "register_subscription"),
             patch.object(OPFFederate, "register_publication"),
         ):
-
             broker_config = MagicMock()
             fed = OPFFederate(broker_config)
 
@@ -65,9 +62,8 @@ def test_load_static_inputs(tmp_path) -> None:
 
 
 def test_generate_area_info_missing_slack_bus() -> None:
-    import networkx as nx
-    from oedisi.types.data_types import Topology
     import adapter
+    import networkx as nx
 
     # Create a simple graph that does not contain slack bus "150"
     graph = nx.Graph()
@@ -78,8 +74,36 @@ def test_generate_area_info_missing_slack_bus() -> None:
 
     # Call generate_area_info with a slack_bus that is not in the graph
     # Boundary ids match the edge to prevent early return on boundary check
-    res_branch, res_bus = adapter.generate_area_info(graph, topology, slack_bus="150", boundary=["sw2"])
+    res_branch, res_bus = adapter.generate_area_info(
+        graph, topology, slack_bus="150", boundary=["sw2"]
+    )
 
     # Should return None, None instead of crashing with NodeNotFound
     assert res_branch is None
     assert res_bus is None
+
+
+def test_schema_and_component_definition() -> None:
+    # 1. Load schema.json
+    schema_path = Path(__file__).resolve().parents[1] / "schema.json"
+    with open(schema_path, encoding="utf-8") as f:
+        schema_json = json.load(f)
+
+    # 2. Get current model schema
+    model_schema = ComponentParameters.model_json_schema()
+
+    # Verify they align
+    assert model_schema == schema_json
+
+    # 3. Load component_definition.json
+    comp_def_path = Path(__file__).resolve().parents[1] / "component_definition.json"
+    with open(comp_def_path, encoding="utf-8") as f:
+        comp_def = json.load(f)
+
+    static_inputs = comp_def.get("static_inputs", [])
+    static_input_names = {item["port_id"] for item in static_inputs}
+
+    schema_properties = set(model_schema.get("properties", {}).keys())
+
+    # Verify static_inputs matches the schema properties exactly
+    assert static_input_names == schema_properties
