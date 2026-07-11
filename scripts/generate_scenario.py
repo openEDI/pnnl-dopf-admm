@@ -1,5 +1,4 @@
 import copy
-import csv
 import json
 import os
 
@@ -493,7 +492,9 @@ def generate_for_model(
     areas_clean = disconnect_areas(graph2, boundaries)
     areas = reconnect_area_switches(copy.deepcopy(areas_clean), boundaries)
 
-    system = WiringDiagram(name=f"{ALGO}_{model_dir}_{num_areas}", components=[], links=[])
+    system = WiringDiagram(
+        name=f"{ALGO}_{model_dir}_{num_areas}", components=[], links=[]
+    )
 
     if "ieee" in model_dir.lower():
         feeder = generate_feeder("ieee123", "", OUTPUTS)

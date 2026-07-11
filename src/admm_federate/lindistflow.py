@@ -944,16 +944,29 @@ def optimal_power_flow(
             info = getattr(extra_stats, "info", None)
             if info is not None:
                 opt_gap = getattr(info, "duality_gap", getattr(info, "gap", 0.0))
-                fea_gap = getattr(info, "prim_res", getattr(info, "pres", getattr(info, "res_primal", getattr(info, "res_pri", 0.0))))
+                fea_gap = getattr(
+                    info,
+                    "prim_res",
+                    getattr(
+                        info,
+                        "pres",
+                        getattr(info, "res_primal", getattr(info, "res_pri", 0.0)),
+                    ),
+                )
         # Check if extra_stats is a dictionary (e.g., SCS, ECOS, etc.)
         elif isinstance(extra_stats, dict):
             info = extra_stats.get("info")
             if isinstance(info, dict):
                 opt_gap = info.get("gap", 0.0)
-                fea_gap = info.get("pres", info.get("res_primal", info.get("res_pri", 0.0)))
+                fea_gap = info.get(
+                    "pres", info.get("res_primal", info.get("res_pri", 0.0))
+                )
             else:
                 opt_gap = extra_stats.get("gap", 0.0)
-                fea_gap = extra_stats.get("pres", extra_stats.get("res_primal", extra_stats.get("res_pri", 0.0)))
+                fea_gap = extra_stats.get(
+                    "pres",
+                    extra_stats.get("res_primal", extra_stats.get("res_pri", 0.0)),
+                )
 
     stats = {
         "solve_time": prob.solver_stats.solve_time,

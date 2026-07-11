@@ -199,7 +199,7 @@ def extract_forecast(bus: dict, forecast) -> dict:
         phases = bus[name]["phases"]
         for ph in phases:
             phase = int(ph) - 1
-            logger.debug(f"{eq}.{ph} : {power/len(phases)}")
+            logger.debug(f"{eq}.{ph} : {power / len(phases)}")
             bus[name]["eqid"] = eq
             bus[name]["pv"][phase][0] = power * 1000 / len(phases)
             bus[name]["pv"][phase][1] = 0.0
