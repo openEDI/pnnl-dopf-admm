@@ -241,18 +241,21 @@ class OPFFederate:
         self.pub_solver_stats = self.fed.register_publication(
             "solver_stats", h.HELICS_DATA_TYPE_STRING, ""
         )
-        #        self.pub_powers_mag = self.fed.register_publication(
-        #            "power_mag", h.HELICS_DATA_TYPE_STRING, ""
-        #        )
-        #        self.pub_powers_angle = self.fed.register_publication(
-        #            "power_angle", h.HELICS_DATA_TYPE_STRING, ""
-        #        )
-        #        self.pub_voltages_mag = self.fed.register_publication(
-        #            "voltage_mag", h.HELICS_DATA_TYPE_STRING, ""
-        #        )
-        #        self.pub_voltages_angle = self.fed.register_publication(
-        #            "voltage_angle", h.HELICS_DATA_TYPE_STRING, ""
-        #        )
+        self.pub_controls_real = self.fed.register_publication(
+            "controls_real", h.HELICS_DATA_TYPE_STRING, ""
+        )
+        self.pub_controls_imag = self.fed.register_publication(
+            "controls_imag", h.HELICS_DATA_TYPE_STRING, ""
+        )
+        self.pub_powers_mag = self.fed.register_publication(
+            "powers_mag", h.HELICS_DATA_TYPE_STRING, ""
+        )
+        self.pub_powers_ang = self.fed.register_publication(
+            "powers_ang", h.HELICS_DATA_TYPE_STRING, ""
+        )
+        self.pub_voltages_mag = self.fed.register_publication(
+            "voltages_mag", h.HELICS_DATA_TYPE_STRING, ""
+        )
         self.pub_admm_v = self.fed.register_publication(
             "pub_v", h.HELICS_DATA_TYPE_STRING, ""
         )
@@ -547,8 +550,8 @@ class OPFFederate:
         )
 
         vmag = adapter.pack_voltages(v_mag, bus_info, t)
-        self.area_v = copy.deepcopy(
-            adapter.filter_boundary_voltage(self.switch_buses, vmag)
+        self.area_v = adapter.filter_boundary_voltage(
+            self.switch_buses, copy.deepcopy(vmag)
         )
 
         self.pub_admm_p.publish(self.area_p.model_dump_json())
@@ -613,10 +616,22 @@ class OPFFederate:
                 logger.debug("Converged")
                 self.converged = True
 
-        # Only publish command setpoints when converged or max iteration is reached
+        # Only publish command setpoints and other outputs when converged or max iteration is reached
         if self.converged or self.itr >= self.static.max_itr:
             cmd_list = CommandList(root=commands)
             self.pub_pv_set.publish(cmd_list.model_dump_json())
+            ctrl_real = adapter.pack_controls_real(real_setpts, t)
+            self.pub_controls_real.publish(ctrl_real.model_dump_json())
+
+            ctrl_imag = adapter.pack_controls_imag(real_setpts, t)
+            self.pub_controls_imag.publish(ctrl_imag.model_dump_json())
+
+            power_mag = adapter.pack_powers_magnitude(branch_pq, t)
+            power_ang = adapter.pack_powers_angle(branch_pq, t)
+            self.pub_powers_mag.publish(power_mag.model_dump_json())
+            self.pub_powers_ang.publish(power_ang.model_dump_json())
+
+            self.pub_voltages_mag.publish(vmag.model_dump_json())
 
         solver_stats = MeasurementArray(
             ids=list(stats.keys()),
@@ -625,11 +640,6 @@ class OPFFederate:
             units="s",
         )
         self.pub_solver_stats.publish(solver_stats.model_dump_json())
-
-        # self.pub_voltages_mag.publish(v_mag.model_dump_json())
-        # self.pub_voltages_angle.publish(voltages_ang.model_dump_json())
-        # self.pub_powers_mag.publish(power_mag.model_dump_json())
-        # self.pub_powers_angle.publish(power_ang.model_dump_json())
 
     def run(self) -> None:
         try:

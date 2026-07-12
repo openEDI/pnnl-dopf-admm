@@ -1,4 +1,5 @@
 import logging
+import math
 from dataclasses import asdict, dataclass, field
 
 import networkx as nx
@@ -8,7 +9,9 @@ from oedisi.types.data_types import (
     Incidence,
     IncidenceList,
     Injection,
+    PowersAngle,
     PowersImaginary,
+    PowersMagnitude,
     PowersReal,
     Topology,
     VoltagesMagnitude,
@@ -181,7 +184,45 @@ def pack_powers_imag(base: PowersImaginary, powers: dict, time: int) -> PowersIm
             ids.append(id)
             eq_ids.append(eq)
             values.append(round(powers[id], 6))
-    return PowersReal(ids=ids, equipment_ids=eq_ids, values=values, time=time)
+    return PowersImaginary(ids=ids, equipment_ids=eq_ids, values=values, time=time)
+
+
+def pack_controls_real(real_setpts: dict[str, complex], time: int) -> PowersReal:
+    ids = list(real_setpts.keys())
+    values = [val.real for val in real_setpts.values()]
+    return PowersReal(ids=ids, values=values, equipment_ids=ids, time=time)
+
+
+def pack_controls_imag(real_setpts: dict[str, complex], time: int) -> PowersImaginary:
+    ids = list(real_setpts.keys())
+    values = [val.imag for val in real_setpts.values()]
+    return PowersImaginary(ids=ids, values=values, equipment_ids=ids, time=time)
+
+
+def pack_powers_magnitude(
+    branch_pq: dict[str, tuple[float, float]], time: int
+) -> PowersMagnitude:
+    pmag_ids = []
+    pmag_vals = []
+    for k, pq in branch_pq.items():
+        pmag_ids.append(k)
+        pmag_vals.append(math.sqrt(pq[0] ** 2 + pq[1] ** 2))
+    return PowersMagnitude(
+        ids=pmag_ids, values=pmag_vals, equipment_ids=pmag_ids, time=time
+    )
+
+
+def pack_powers_angle(
+    branch_pq: dict[str, tuple[float, float]], time: int
+) -> PowersAngle:
+    pang_ids = []
+    pang_vals = []
+    for k, pq in branch_pq.items():
+        pang_ids.append(k)
+        pang_vals.append(math.atan2(pq[1], pq[0]))
+    return PowersAngle(
+        ids=pang_ids, values=pang_vals, equipment_ids=pang_ids, time=time
+    )
 
 
 def extract_forecast(bus: dict, forecast) -> dict:
