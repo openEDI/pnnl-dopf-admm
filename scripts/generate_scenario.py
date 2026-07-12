@@ -458,11 +458,6 @@ def link_algo(system: WiringDiagram, algo: Component, feeder: Component) -> None
         Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
     )
 
-    port = "solver_stats"
-    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    system.components.append(component)
-    system.links.append(link)
-
     port = "injections"
     system.links.append(
         Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
@@ -472,6 +467,36 @@ def link_algo(system: WiringDiagram, algo: Component, feeder: Component) -> None
     system.links.append(
         Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
     )
+
+    port = "solver_stats"
+    component, link = generate_recorder(port, algo.name, OUTPUTS)
+    system.components.append(component)
+    system.links.append(link)
+
+    port = "voltages_mag"
+    component, link = generate_recorder(port, algo.name, OUTPUTS)
+    system.components.append(component)
+    system.links.append(link)
+
+    port = "powers_mag"
+    component, link = generate_recorder(port, algo.name, OUTPUTS)
+    system.components.append(component)
+    system.links.append(link)
+
+    port = "powers_ang"
+    component, link = generate_recorder(port, algo.name, OUTPUTS)
+    system.components.append(component)
+    system.links.append(link)
+
+    port = "controls_real"
+    component, link = generate_recorder(port, algo.name, OUTPUTS)
+    system.components.append(component)
+    system.links.append(link)
+
+    port = "controls_imag"
+    component, link = generate_recorder(port, algo.name, OUTPUTS)
+    system.components.append(component)
+    system.links.append(link)
 
 
 def generate_for_model(
