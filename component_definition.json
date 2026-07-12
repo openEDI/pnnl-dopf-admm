@@ -92,7 +92,11 @@
     "dynamic_outputs": [
         {
             "type": "PowersReal",
-            "port_id": "estimated_power"
+            "port_id": "controls_real"
+        },
+        {
+            "type": "PowersImaginary",
+            "port_id": "controls_imag"
         },
         {
             "type": "MeasurementArray",
@@ -100,19 +104,15 @@
         },
         {
             "type": "PowersMagnitude",
-            "port_id": "power_mag"
+            "port_id": "powers_mag"
         },
         {
             "type": "PowersAngle",
-            "port_id": "power_angle"
+            "port_id": "powers_ang"
         },
         {
             "type": "VoltagesMagnitude",
-            "port_id": "voltage_mag"
-        },
-        {
-            "type": "VoltagesAngle",
-            "port_id": "voltage_angle"
+            "port_id": "voltages_mag"
         },
         {
             "type": "PowersReal",

@@ -1,6 +1,6 @@
 {
     "directory": "admm_federate",
-    "execute_function": "python -m src/admm_federate/opf_federate.py",
+    "execute_function": "python -m src.admm_federate.opf_federate",
     "static_inputs": [
         {
             "type": "",
@@ -62,18 +62,18 @@
     "dynamic_inputs": [
         {
             "type": "VoltagesReal",
-            "port_id": "voltage_real"
+            "port_id": "voltages_real"
         },
         {
             "type": "VoltagesImaginary",
-            "port_id": "voltage_imag"
+            "port_id": "voltages_imag"
         },
         {
             "type": "Topology",
             "port_id": "topology"
         },
         {
-            "type": "Injections",
+            "type": "Injection",
             "port_id": "injections"
         },
         {
@@ -92,7 +92,11 @@
     "dynamic_outputs": [
         {
             "type": "PowersReal",
-            "port_id": "estimated_power"
+            "port_id": "controls_real"
+        },
+        {
+            "type": "PowersImaginary",
+            "port_id": "controls_imag"
         },
         {
             "type": "MeasurementArray",
@@ -100,19 +104,15 @@
         },
         {
             "type": "PowersMagnitude",
-            "port_id": "power_mag"
+            "port_id": "powers_mag"
         },
         {
             "type": "PowersAngle",
-            "port_id": "power_angle"
+            "port_id": "powers_ang"
         },
         {
             "type": "VoltagesMagnitude",
-            "port_id": "voltage_mag"
-        },
-        {
-            "type": "VoltagesAngle",
-            "port_id": "voltage_angle"
+            "port_id": "voltages_mag"
         },
         {
             "type": "PowersReal",
