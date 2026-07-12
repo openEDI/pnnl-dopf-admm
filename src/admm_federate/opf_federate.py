@@ -501,7 +501,7 @@ class OPFFederate:
             self.area_graph, self.parent_bus
         )
         self.admm_config.relaxed = self.static.relaxed
-        v_mag, branch_pq, aux_pq, control, stats = lindistflow.solve(
+        v_mag, branch_pq, aux_pq, control, stats = lindistflow.optimal_power_flow(
             branch_info, bus_info, self.child_info, self.parent_info, self.admm_config
         )
         real_setpts = self.get_set_points(control, bus_info)

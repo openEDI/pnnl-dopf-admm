@@ -548,7 +548,7 @@ def tag_regulators(branch_info: BranchInfo, bus_info: BusInfo) -> BranchInfo:
         dst = bus_info.buses[branch.to_bus]
 
         if round(src.base_kv, 3) == round(dst.base_kv, 3):
-            branch.tag == "REG"
+            branch.tag = "REG"
     return branch_info
 
 
