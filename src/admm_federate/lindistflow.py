@@ -212,7 +212,7 @@ def optimal_power_flow(
     buses = bus_pu.buses
     slack_bus = config.source_bus
 
-    slack_v = max([b.kv for b in buses.values()])
+    slack_v = buses[slack_bus].kv
     basekV = buses[slack_bus].base_kv
     baseZ = 1.0
     SOURCE_V = [slack_v / basekV] * 3
@@ -793,9 +793,9 @@ def optimal_power_flow(
             counteq += 1
 
             # DG upper limit set up:
-            DG_up_lim[nbus_ABC * 0 + val_bus.idx] = val_bus.base_pv[0][0] * BASE_S
-            DG_up_lim[nbus_ABC * 1 + val_bus.idx] = val_bus.base_pv[1][0] * BASE_S
-            DG_up_lim[nbus_ABC * 2 + val_bus.idx] = val_bus.base_pv[2][0] * BASE_S
+            DG_up_lim[nbus_ABC * 0 + val_bus.idx] = val_bus.pv[0][0] * BASE_S
+            DG_up_lim[nbus_ABC * 1 + val_bus.idx] = val_bus.pv[1][0] * BASE_S
+            DG_up_lim[nbus_ABC * 2 + val_bus.idx] = val_bus.pv[2][0] * BASE_S
 
             # DG active limit set up:
             DG_active_up_lim[nbus_ABC * 0 + val_bus.idx] = val_bus.pv[0][0] * BASE_S
@@ -818,6 +818,7 @@ def optimal_power_flow(
             counteq += 1
 
             DG_up_lim[nbus_ABC * 2 + val_bus.idx] = val_bus.pv[0][0] * BASE_S
+            DG_active_up_lim[nbus_ABC * 2 + val_bus.idx] = val_bus.pv[0][0] * BASE_S
 
     # Reactive power as a function of real power and inverter rating
     countineq = 0
@@ -870,27 +871,45 @@ def optimal_power_flow(
         vmax = 1.05
         vmin = 0.95
 
+    idx_to_bus = {b.idx: b for b in buses.values() if b.base_kv > PRIMARY_V}
     for k in range(nbus_ABC):
         if k in v_idxs:
+            val_bus = idx_to_bus.get(k)
+            if val_bus is not None and val_bus.base_kv > 0:
+                v_meas_a = val_bus.kvs[0] / val_bus.base_kv
+                v_meas_b = val_bus.kvs[1] / val_bus.base_kv
+                v_meas_c = val_bus.kvs[2] / val_bus.base_kv
+            else:
+                v_meas_a = v_meas_b = v_meas_c = 1.0
+
+            vmax_a = max(vmax, v_meas_a) if v_meas_a > 0.1 else vmax
+            vmin_a = min(vmin, v_meas_a) if v_meas_a > 0.1 else vmin
+
+            vmax_b = max(vmax, v_meas_b) if v_meas_b > 0.1 else vmax
+            vmin_b = min(vmin, v_meas_b) if v_meas_b > 0.1 else vmin
+
+            vmax_c = max(vmax, v_meas_c) if v_meas_c > 0.1 else vmax
+            vmin_c = min(vmin, v_meas_c) if v_meas_c > 0.1 else vmin
+
             # Upper bound
             A_ineq[countineq, k] = 1
-            b_ineq[countineq] = vmax**2
+            b_ineq[countineq] = vmax_a**2
             countineq += 1
             A_ineq[countineq, k + nbus_ABC] = 1
-            b_ineq[countineq] = vmax**2
+            b_ineq[countineq] = vmax_b**2
             countineq += 1
             A_ineq[countineq, k + nbus_ABC * 2] = 1
-            b_ineq[countineq] = vmax**2
+            b_ineq[countineq] = vmax_c**2
             countineq += 1
             # Lower Bound
             A_ineq[countineq, k] = -1
-            b_ineq[countineq] = -(vmin**2)
+            b_ineq[countineq] = -(vmin_a**2)
             countineq += 1
             A_ineq[countineq, k + nbus_ABC] = -1
-            b_ineq[countineq] = -(vmin**2)
+            b_ineq[countineq] = -(vmin_b**2)
             countineq += 1
             A_ineq[countineq, k + nbus_ABC * 2] = -1
-            b_ineq[countineq] = -(vmin**2)
+            b_ineq[countineq] = -(vmin_c**2)
             countineq += 1
 
     prob = cp.Problem(

@@ -156,6 +156,7 @@ class OPFFederate:
         self.shared_buses = []
         self.switch_buses = []
         self.shared_lines = {}
+        self.has_received_feeder_data = False
         self.load_static_inputs()
         self.load_input_mapping()
         self.initilize(broker_config)
@@ -437,6 +438,9 @@ class OPFFederate:
         if self.area_graph is None:
             self.init_area()
 
+        if self.sub.voltages_real.is_updated():
+            self.has_received_feeder_data = True
+
         voltages_real = VoltagesReal.model_validate(self.sub.voltages_real.json)
         voltages_imag = VoltagesImaginary.model_validate(self.sub.voltages_imag.json)
         voltages = measurement_to_xarray(voltages_real) + 1j * measurement_to_xarray(
@@ -617,7 +621,9 @@ class OPFFederate:
                 self.converged = True
 
         # Only publish command setpoints and other outputs when converged or max iteration is reached
-        if self.converged or self.itr >= self.static.max_itr:
+        if (
+            self.converged or self.itr >= self.static.max_itr
+        ) and self.has_received_feeder_data:
             cmd_list = CommandList(root=commands)
             self.pub_pv_set.publish(cmd_list.model_dump_json())
             ctrl_real = adapter.pack_controls_real(real_setpts, t)
@@ -633,13 +639,14 @@ class OPFFederate:
 
             self.pub_voltages_mag.publish(vmag.model_dump_json())
 
-        solver_stats = MeasurementArray(
-            ids=list(stats.keys()),
-            values=list(stats.values()),
-            time=t,
-            units="s",
-        )
-        self.pub_solver_stats.publish(solver_stats.model_dump_json())
+        if self.has_received_feeder_data:
+            solver_stats = MeasurementArray(
+                ids=list(stats.keys()),
+                values=list(stats.values()),
+                time=t,
+                units="s",
+            )
+            self.pub_solver_stats.publish(solver_stats.model_dump_json())
 
     def run(self) -> None:
         try:
