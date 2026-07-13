@@ -31,7 +31,7 @@ SMART_DS = {
     "SFO/P1U": "p1uhs0_1247/p1uhs0_1247--p1udt942",
 }
 
-T_STEPS = 1
+T_STEPS = 4
 DELTA_T = 60 * 60  # minutes * seconds per hour
 
 
@@ -228,7 +228,7 @@ def generate_feeder_ieee(OUTPUTS: str) -> Component:
             "profile_location": profiles,
             "opendss_location": opendss,
             "feeder_file": file,
-            "start_date": "2018-05-01 00:00:00",
+            "start_date": "2018-05-01 10:00:00",
             "number_of_timesteps": T_STEPS,
             "run_freq_sec": DELTA_T,
             "topology_output": f"{OUTPUTS}/topology.json",

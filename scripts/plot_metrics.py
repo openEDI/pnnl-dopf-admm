@@ -270,6 +270,27 @@ def process_voltages(
     return voltage_comparisons
 
 
+def get_descendants(G: nx.Graph, root: str, node: str) -> set[str]:
+    """Find all nodes downstream of `node` in the tree rooted at `root`."""
+    if root == node:
+        return set(G.nodes())
+    try:
+        path = nx.shortest_path(G, source=root, target=node)
+        parent = path[-2] if len(path) > 1 else None
+    except nx.NetworkXNoPath:
+        parent = None
+
+    descendants = {node}
+    queue = [node]
+    while queue:
+        curr = queue.pop(0)
+        for neighbor in G.neighbors(curr):
+            if neighbor != parent and neighbor not in descendants:
+                descendants.add(neighbor)
+                queue.append(neighbor)
+    return descendants
+
+
 def process_power_flows(
     data: dict[str, pd.DataFrame],
     area_ids: list[int],
@@ -277,6 +298,7 @@ def process_power_flows(
     G: nx.Graph,
     area_buses: list[list[str]],
     der_map: dict[str, list[str]],
+    slack_bus: str,
 ) -> dict[str, Any]:
     """Process boundary power flows and DER active/reactive power controls."""
     results: dict[str, Any] = {
@@ -337,41 +359,30 @@ def process_power_flows(
                 q_admm = mag * math.sin(ang)
 
                 # Compute feeder net injection in the area to compare
-                # against boundary flow
-                # Sum of injections over all buses in this area for this phase
-                p_feeder_sum = 0.0
-                q_feeder_sum = 0.0
-                buses_in_area = area_buses[aid]
+                p_feeder_val = 0.0
+                q_feeder_val = 0.0
 
                 if "feeder_p_real" in data:
                     feeder_p = data["feeder_p_real"].set_index("time")
-                    cols_to_sum = [
-                        f"{b}.{phase}"
-                        for b in buses_in_area
-                        if f"{b}.{phase}" in feeder_p.columns
-                    ]
-                    if t in feeder_p.index:
-                        p_feeder_sum = float(feeder_p.loc[t, cols_to_sum].sum())
+                    col_name = f"{source_bus}.{phase}"
+                    if col_name in feeder_p.columns and t in feeder_p.index:
+                        p_feeder_val = float(feeder_p.loc[t, col_name])
 
                 if "feeder_p_imag" in data:
                     feeder_q = data["feeder_p_imag"].set_index("time")
-                    cols_to_sum = [
-                        f"{b}.{phase}"
-                        for b in buses_in_area
-                        if f"{b}.{phase}" in feeder_q.columns
-                    ]
-                    if t in feeder_q.index:
-                        q_feeder_sum = float(feeder_q.loc[t, cols_to_sum].sum())
+                    col_name = f"{source_bus}.{phase}"
+                    if col_name in feeder_q.columns and t in feeder_q.index:
+                        q_feeder_val = float(feeder_q.loc[t, col_name])
 
-                # Note: net import into area = - sum(internal injections)
+                # Note: net import into area = - boundary node injection
                 boundary_records.append(
                     {
                         "time": t,
                         "phase": phase,
                         "p_admm_boundary": p_admm,
                         "q_admm_boundary": q_admm,
-                        "p_feeder_net_import": -p_feeder_sum,
-                        "q_feeder_net_import": -q_feeder_sum,
+                        "p_feeder_net_import": -p_feeder_val,
+                        "q_feeder_net_import": -q_feeder_val,
                     }
                 )
 
@@ -969,7 +980,9 @@ def main() -> None:
     # 4. Process metrics and evaluate results
     logger.info("Processing metrics...")
     voltage_data = process_voltages(data, area_ids, area_buses, topology)
-    flow_data = process_power_flows(data, area_ids, area_params, G, area_buses, der_map)
+    flow_data = process_power_flows(
+        data, area_ids, area_params, G, area_buses, der_map, slack_bus
+    )
     adequacy_df = process_generation_adequacy(topology, area_ids, area_buses)
     convergence_data = process_convergence(data, area_ids)
 
