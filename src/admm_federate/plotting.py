@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 from oedisi.types.data_types import Topology
-from admm_federate.adapter import area_disconnects, disconnect_areas, generate_graph
+from .adapter import area_disconnects, disconnect_areas, generate_graph
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,14 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
     else:
         scenario_dict = scenario
 
+    # Map component name to its parameters and type
+    components = {comp["name"]: comp for comp in scenario_dict.get("components", [])}
+    feeder_names = [name for name, comp in components.items() if comp.get("type") in ["Feeder", "LocalFeeder"]]
+    control_feeder_name = next((name for name in feeder_names if "control" in name.lower() or "local" in name.lower()), None)
+    reference_feeder_name = next((name for name in feeder_names if "reference" in name.lower() or "ref" in name.lower()), None)
+    if not control_feeder_name and feeder_names:
+        control_feeder_name = feeder_names[0]
+
     # Build a lookup of target component name to its incoming link details (source, source_port)
     incoming_links = {}
     for link in scenario_dict.get("links", []):
@@ -134,7 +142,26 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
         link_info = incoming_links.get(name)
         if link_info:
             source, source_port = link_info
-            if source == "feeder":
+            if source == control_feeder_name:
+                if source_port == "voltages_real":
+                    key = "feeder_v_real"
+                elif source_port == "voltages_imag":
+                    key = "feeder_v_imag"
+                elif source_port == "powers_real":
+                    key = "feeder_p_real"
+                elif source_port == "powers_imag":
+                    key = "feeder_p_imag"
+            elif source == reference_feeder_name:
+                if source_port == "voltages_real":
+                    key = "reference_v_real"
+                elif source_port == "voltages_imag":
+                    key = "reference_v_imag"
+                elif source_port == "powers_real":
+                    key = "reference_p_real"
+                elif source_port == "powers_imag":
+                    key = "reference_p_imag"
+            elif source == "feeder" and not reference_feeder_name:
+                # Fallback for single feeder named "feeder"
                 if source_port == "voltages_real":
                     key = "feeder_v_real"
                 elif source_port == "voltages_imag":
@@ -179,20 +206,29 @@ def process_voltages(
     area_buses: list[list[str]],
     topology: Topology,
 ) -> dict[int, pd.DataFrame]:
-    """Calculate feeder voltage magnitudes for all buses in each area and compare them with ADMM values."""
+    """Calculate voltage magnitudes from both reference and control feeders
+    for all buses in each area and compare them."""
     voltage_comparisons: dict[int, pd.DataFrame] = {}
 
-    if "feeder_v_real" not in data or "feeder_v_imag" not in data:
+    # Need both control and reference feeder voltage data
+    has_control = "feeder_v_real" in data and "feeder_v_imag" in data
+    has_reference = "reference_v_real" in data and "reference_v_imag" in data
+
+    if not has_control:
         logger.error(
-            "Feeder voltage real/imag data missing. Skipping voltage processing."
+            "Control feeder voltage real/imag data missing. Skipping voltage processing."
         )
         return {}
 
-    v_real_df = data["feeder_v_real"].set_index("time")
-    v_imag_df = data["feeder_v_imag"].set_index("time")
+    ctrl_real_df = data["feeder_v_real"].set_index("time")
+    ctrl_imag_df = data["feeder_v_imag"].set_index("time")
+    ctrl_v_mag = (ctrl_real_df**2 + ctrl_imag_df**2) ** 0.5
 
-    # Compute feeder voltage magnitude
-    feeder_v_mag = (v_real_df**2 + v_imag_df**2) ** 0.5
+    ref_v_mag = None
+    if has_reference:
+        ref_real_df = data["reference_v_real"].set_index("time")
+        ref_imag_df = data["reference_v_imag"].set_index("time")
+        ref_v_mag = (ref_real_df**2 + ref_imag_df**2) ** 0.5
 
     # Map bus_phase to its nominal base voltage magnitude
     base_voltages = {}
@@ -205,16 +241,16 @@ def process_voltages(
         )
 
     for aid in area_ids:
-        area_v_key = f"area_{aid}_v_mag"
         buses_in_area = area_buses[aid]
         comparison_records = []
 
-        area_v_df = None
-        if area_v_key in data:
-            area_v_df = data[area_v_key].set_index("time")
+        # Determine common timestamps between control and reference
+        if ref_v_mag is not None:
+            common_times = ctrl_v_mag.index.intersection(ref_v_mag.index)
+        else:
+            common_times = ctrl_v_mag.index
 
-        # Loop over ALL feeder columns to cover all buses in the area
-        for col in feeder_v_mag.columns:
+        for col in ctrl_v_mag.columns:
             if col == "time":
                 continue
             bus_name = col.split(".", 1)[0]
@@ -223,25 +259,20 @@ def process_voltages(
                 if base_v <= 0:
                     base_v = 1.0
 
-                if area_v_df is not None:
-                    common_times = area_v_df.index.intersection(feeder_v_mag.index)
-                else:
-                    common_times = feeder_v_mag.index
-
                 for t in common_times:
-                    v_feeder_val = float(feeder_v_mag.loc[t, col]) / base_v
+                    v_ctrl_val = float(ctrl_v_mag.loc[t, col]) / base_v
 
-                    v_admm_val = None
-                    if area_v_df is not None and col in area_v_df.columns:
-                        v_admm_val = float(area_v_df.loc[t, col]) / base_v
+                    v_ref_val = None
+                    if ref_v_mag is not None and col in ref_v_mag.columns:
+                        v_ref_val = float(ref_v_mag.loc[t, col]) / base_v
 
                     comparison_records.append(
                         {
                             "time": t,
                             "bus_phase": col,
                             "area_id": aid,
-                            "v_admm": v_admm_val,
-                            "v_feeder": v_feeder_val,
+                            "v_reference": v_ref_val,
+                            "v_control": v_ctrl_val,
                         }
                     )
 
@@ -249,6 +280,7 @@ def process_voltages(
             voltage_comparisons[aid] = pd.DataFrame(comparison_records)
 
     return voltage_comparisons
+
 
 
 def get_descendants(G: nx.Graph, root: str, node: str) -> set[str]:
@@ -294,74 +326,59 @@ def process_power_flows(
             continue
 
         source_bus = params.get("source_bus", "")
-        source_line = params.get("source_line")
-
-        branch_name = get_boundary_branch_name(G, source_bus, source_line)
-        if not branch_name:
+        if not source_bus:
             continue
 
-        p_mag_key = f"area_{aid}_p_mag"
-        p_ang_key = f"area_{aid}_p_ang"
-
-        if p_mag_key not in data or p_ang_key not in data:
+        # Check if control feeder power data is available
+        if "feeder_p_real" not in data or "feeder_p_imag" not in data:
             continue
 
-        p_mag_df = data[p_mag_key].set_index("time")
-        p_ang_df = data[p_ang_key].set_index("time")
+        feeder_p = data["feeder_p_real"].set_index("time")
+        feeder_q = data["feeder_p_imag"].set_index("time")
 
-        # Find columns corresponding to the boundary branch (in either direction)
-        u, v = branch_name.split("_")
-        name1 = f"{u}_{v}"
-        name2 = f"{v}_{u}"
-        line_cols = [
-            c
-            for c in p_mag_df.columns
-            if c.startswith(f"{name1}.") or c.startswith(f"{name2}.")
-        ]
+        # Check reference feeder power data
+        has_reference = "reference_p_real" in data and "reference_p_imag" in data
+        if has_reference:
+            ref_p = data["reference_p_real"].set_index("time")
+            ref_q = data["reference_p_imag"].set_index("time")
+            common_times = feeder_p.index.intersection(ref_p.index)
+        else:
+            ref_p, ref_q = None, None
+            common_times = feeder_p.index
 
-        if not line_cols:
+        # Find columns corresponding to source_bus
+        bus_cols = [c for c in feeder_p.columns if c.startswith(f"{source_bus}.")]
+        if not bus_cols:
             continue
 
         boundary_records = []
-        for col in line_cols:
+        for col in bus_cols:
             phase = col.split(".")[-1]
-            common_times = p_mag_df.index.intersection(p_ang_df.index)
             for t in common_times:
-                mag = float(p_mag_df.loc[t, col])
-                ang = float(p_ang_df.loc[t, col])
-                p_admm = mag * math.cos(ang)
-                q_admm = mag * math.sin(ang)
+                p_ctrl_val = float(feeder_p.loc[t, col])
+                q_ctrl_val = float(feeder_q.loc[t, col])
 
-                # Compute feeder net injection in the area to compare
-                p_feeder_val = 0.0
-                q_feeder_val = 0.0
+                p_ref_val = 0.0
+                q_ref_val = 0.0
+                if ref_p is not None and col in ref_p.columns:
+                    p_ref_val = float(ref_p.loc[t, col])
+                if ref_q is not None and col in ref_q.columns:
+                    q_ref_val = float(ref_q.loc[t, col])
 
-                if "feeder_p_real" in data:
-                    feeder_p = data["feeder_p_real"].set_index("time")
-                    col_name = f"{source_bus}.{phase}"
-                    if col_name in feeder_p.columns and t in feeder_p.index:
-                        p_feeder_val = float(feeder_p.loc[t, col_name])
-
-                if "feeder_p_imag" in data:
-                    feeder_q = data["feeder_p_imag"].set_index("time")
-                    col_name = f"{source_bus}.{phase}"
-                    if col_name in feeder_q.columns and t in feeder_q.index:
-                        q_feeder_val = float(feeder_q.loc[t, col_name])
-
-                # Note: net import into area = - boundary node injection
                 boundary_records.append(
                     {
                         "time": t,
                         "phase": phase,
-                        "p_admm_boundary": p_admm,
-                        "q_admm_boundary": q_admm,
-                        "p_feeder_net_import": -p_feeder_val,
-                        "q_feeder_net_import": -q_feeder_val,
+                        "p_control_net_import": -p_ctrl_val,
+                        "q_control_net_import": -q_ctrl_val,
+                        "p_reference_net_import": -p_ref_val,
+                        "q_reference_net_import": -q_ref_val,
                     }
                 )
 
         if boundary_records:
             results["boundary_flows"][aid] = pd.DataFrame(boundary_records)
+
 
     # 2. Highlight DER Injections (Controls)
     for aid in area_ids:
@@ -614,7 +631,7 @@ def process_generation_adequacy(
 def plot_voltage_comparison(
     voltage_data: dict[int, pd.DataFrame]
 ) -> plt.Figure | None:
-    """Generate a high-quality split violin plot comparing ADMM vs Feeder voltages."""
+    """Generate a split violin plot comparing Reference vs Control feeder voltages per area."""
     import seaborn as sns
 
     sns.set_theme(style="whitegrid")
@@ -627,14 +644,15 @@ def plot_voltage_comparison(
         df_latest = df[df["time"] == latest_time]
 
         for _, row in df_latest.iterrows():
-            records.append(
-                {"Voltage (p.u.)": row["v_admm"], "Area": f"Area {aid}", "Case": "ADMM"}
-            )
+            if row.get("v_reference") is not None:
+                records.append(
+                    {"Voltage (p.u.)": row["v_reference"], "Area": f"Area {aid}", "Case": "Reference"}
+                )
             records.append(
                 {
-                    "Voltage (p.u.)": row["v_feeder"],
+                    "Voltage (p.u.)": row["v_control"],
                     "Area": f"Area {aid}",
-                    "Case": "Feeder",
+                    "Case": "Control",
                 }
             )
 
@@ -663,7 +681,7 @@ def plot_voltage_comparison(
     )
 
     ax.set_title(
-        "Bus Voltage Profile Distribution per Area (ADMM vs Feeder)",
+        "Bus Voltage Profile Distribution per Area (Reference vs Control)",
         fontsize=13,
         fontweight="bold",
     )
@@ -671,6 +689,7 @@ def plot_voltage_comparison(
     ax.set_ylabel("Voltage Magnitude (p.u.)", fontsize=11)
     ax.legend(loc="upper right")
     plt.tight_layout()
+
     return fig
 
 
@@ -694,23 +713,23 @@ def plot_power_flow_comparison(flow_data: dict[str, Any]) -> plt.Figure | None:
 
         for _, row in df_latest.iterrows():
             phase = row["phase"]
-            p_admm = row["p_admm_boundary"]
-            p_feeder = row["p_feeder_net_import"]
+            p_control = row.get("p_control_net_import", 0.0)
+            p_reference = row.get("p_reference_net_import", 0.0)
 
             label = f"Area {aid} P{phase}"
 
             records.append(
                 {
                     "Boundary Line": label,
-                    "Real Power (kW)": p_admm,
-                    "Case": "Updated Boundary Flow (ADMM)",
+                    "Real Power (kW)": p_control,
+                    "Case": "Control",
                 }
             )
             records.append(
                 {
                     "Boundary Line": label,
-                    "Real Power (kW)": p_feeder,
-                    "Case": "Baseline Boundary Flow (Feeder)",
+                    "Real Power (kW)": p_reference,
+                    "Case": "Reference",
                 }
             )
 
@@ -720,8 +739,8 @@ def plot_power_flow_comparison(flow_data: dict[str, Any]) -> plt.Figure | None:
 
     df_plot = pd.DataFrame(records)
     df_plot["Abs_Power"] = df_plot["Real Power (kW)"].abs()
-    feeder_powers = df_plot[df_plot["Case"] == "Baseline Boundary Flow (Feeder)"]
-    sorted_labels = feeder_powers.sort_values(by="Abs_Power", ascending=False)[
+    ref_powers = df_plot[df_plot["Case"] == "Reference"]
+    sorted_labels = ref_powers.sort_values(by="Abs_Power", ascending=False)[
         "Boundary Line"
     ].unique()
 
@@ -736,7 +755,7 @@ def plot_power_flow_comparison(flow_data: dict[str, Any]) -> plt.Figure | None:
         order=sorted_labels,
     )
     ax.set_title(
-        "Boundary Power Flow Comparison: ADMM vs. Feeder Reference",
+        "Boundary Power Flow Comparison: Reference vs. Control",
         fontsize=13,
         fontweight="bold",
     )
@@ -745,6 +764,7 @@ def plot_power_flow_comparison(flow_data: dict[str, Any]) -> plt.Figure | None:
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
     return fig
+
 
 
 def plot_generation_adequacy(adequacy_df: pd.DataFrame) -> plt.Figure | None:
@@ -1008,3 +1028,196 @@ def plot_network_partition(
     ax.axis("off")
     plt.tight_layout()
     return fig
+
+
+def plot_voltage_scatter_at_timestep(
+    data: dict[str, pd.DataFrame],
+    topology: Topology,
+    output_path: Path,
+    timestep_idx: int = -1,
+) -> None:
+    """Generate a scatter plot comparing individual bus voltage magnitudes (control vs reference)
+    at a single timestep.
+    """
+    if not all(k in data for k in ["feeder_v_real", "feeder_v_imag", "reference_v_real", "reference_v_imag"]):
+        logger.warning("Missing voltage data for voltage scatter plot. Skipping.")
+        return
+
+    c_real = data["feeder_v_real"]
+    c_imag = data["feeder_v_imag"]
+    r_real = data["reference_v_real"]
+    r_imag = data["reference_v_imag"]
+
+    time_col = "time" if "time" in c_real.columns else c_real.columns[0]
+    
+    # Align by common times
+    c_times = c_real[time_col].unique()
+    r_times = r_real[time_col].unique()
+    common_times = np.intersect1d(c_times, r_times)
+    
+    if len(common_times) == 0:
+        logger.warning("No common timestamps found for voltage scatter plot.")
+        return
+
+    c_r_df = c_real[c_real[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
+    c_i_df = c_imag[c_imag[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
+    r_r_df = r_real[r_real[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
+    r_i_df = r_imag[r_imag[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
+
+    # Compute magnitudes
+    common_cols = [c for c in c_r_df.columns if c in r_r_df.columns]
+    if not common_cols:
+        logger.warning("No common bus columns found for voltage scatter plot.")
+        return
+
+    t_val = common_times[timestep_idx]
+    
+    try:
+        # Load base voltages from topology
+        base_volts_info = topology.base_voltage_magnitudes
+        ids = base_volts_info.ids
+        values = base_volts_info.values
+        base_voltages = dict(zip(ids, values, strict=True))
+    except Exception as e:
+        logger.warning(f"Could not parse topology for base voltages: {e}")
+        base_voltages = {}
+
+    v_ref_list = []
+    v_ctrl_list = []
+
+    for col in common_cols:
+        v_r_ref = r_r_df.loc[t_val, col]
+        v_i_ref = r_i_df.loc[t_val, col]
+        v_ref_mag = (v_r_ref**2 + v_i_ref**2)**0.5
+
+        v_r_ctrl = c_r_df.loc[t_val, col]
+        v_i_ctrl = c_i_df.loc[t_val, col]
+        v_ctrl_mag = (v_r_ctrl**2 + v_i_ctrl**2)**0.5
+
+        base_v = base_voltages.get(col, 1.0)
+        if base_v <= 0:
+            base_v = 1.0
+
+        v_ref_list.append(v_ref_mag / base_v)
+        v_ctrl_list.append(v_ctrl_mag / base_v)
+
+    v_ref = np.array(v_ref_list)
+    v_ctrl = np.array(v_ctrl_list)
+
+    fig, ax = plt.subplots(figsize=(6.5, 6))
+    ax.scatter(v_ref, v_ctrl, color="#1a73e8", alpha=0.7, edgecolors="none", s=50, label="Buses")
+    
+    min_v = min(v_ref.min(), v_ctrl.min(), 0.94)
+    max_v = max(v_ref.max(), v_ctrl.max(), 1.06)
+    ax.plot([min_v, max_v], [min_v, max_v], color="#5f6368", linestyle="--", alpha=0.7, label="No Change (y=x)")
+    
+    ax.axhspan(0.95, 1.05, color="#34a853", alpha=0.08, label="ANSI C84.1 Range")
+    ax.axvspan(0.95, 1.05, color="#34a853", alpha=0.08)
+    
+    ax.set_xlabel("Reference Voltage (p.u.)", fontsize=11)
+    ax.set_ylabel("Control Voltage (p.u.)", fontsize=11)
+    
+    try:
+        t_str = pd.to_datetime(str(t_val)).strftime("%H:%M")
+    except Exception:
+        t_str = str(t_val)
+        
+    ax.set_title(f"Individual Bus Voltages at Timestep {t_str}", fontsize=12, fontweight="bold")
+    ax.grid(True, linestyle=":", alpha=0.6)
+    ax.legend(loc="lower right")
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+    logger.info(f"Saved voltage scatter plot to: {output_path}")
+
+
+def plot_power_scatter_at_timestep(
+    data: dict[str, pd.DataFrame],
+    output_path: Path,
+    timestep_idx: int = -1,
+) -> None:
+    """Generate scatter plots comparing individual bus active and reactive power injections
+    at a single timestep.
+    """
+    if not all(k in data for k in ["feeder_p_real", "feeder_p_imag", "reference_p_real", "reference_p_imag"]):
+        logger.warning("Missing power data for power scatter plot. Skipping.")
+        return
+
+    c_p = data["feeder_p_real"]
+    c_q = data["feeder_p_imag"]
+    r_p = data["reference_p_real"]
+    r_q = data["reference_p_imag"]
+
+    time_col = "time" if "time" in c_p.columns else c_p.columns[0]
+    
+    c_times = c_p[time_col].unique()
+    r_times = r_p[time_col].unique()
+    common_times = np.intersect1d(c_times, r_times)
+    
+    if len(common_times) == 0:
+        logger.warning("No common timestamps found for power scatter plot.")
+        return
+
+    c_p_df = c_p[c_p[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
+    c_q_df = c_q[c_q[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
+    r_p_df = r_p[r_p[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
+    r_q_df = r_q[r_q[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
+
+    common_cols = [c for c in c_p_df.columns if c in r_p_df.columns]
+    if not common_cols:
+        logger.warning("No common bus columns found for power scatter plot.")
+        return
+
+    t_val = common_times[timestep_idx]
+
+    p_ref_list = []
+    p_ctrl_list = []
+    q_ref_list = []
+    q_ctrl_list = []
+
+    for col in common_cols:
+        p_ref_list.append(float(r_p_df.loc[t_val, col]))
+        p_ctrl_list.append(float(c_p_df.loc[t_val, col]))
+        q_ref_list.append(float(r_q_df.loc[t_val, col]))
+        q_ctrl_list.append(float(c_q_df.loc[t_val, col]))
+
+    p_ref = np.array(p_ref_list)
+    p_ctrl = np.array(p_ctrl_list)
+    q_ref = np.array(q_ref_list)
+    q_ctrl = np.array(q_ctrl_list)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5.5))
+
+    # Real Power
+    ax1.scatter(p_ref, p_ctrl, color="#ea4335", alpha=0.7, edgecolors="none", s=40, label="Buses")
+    min_p = min(p_ref.min(), p_ctrl.min())
+    max_p = max(p_ref.max(), p_ctrl.max())
+    ax1.plot([min_p, max_p], [min_p, max_p], color="#5f6368", linestyle="--", alpha=0.7, label="y=x")
+    ax1.set_xlabel("Reference Injection (kW)", fontsize=11)
+    ax1.set_ylabel("Control Injection (kW)", fontsize=11)
+    ax1.set_title("Real Power Injection Comparison", fontsize=12, fontweight="bold")
+    ax1.grid(True, linestyle=":", alpha=0.6)
+    ax1.legend(loc="lower right")
+
+    # Reactive Power
+    ax2.scatter(q_ref, q_ctrl, color="#f9ab00", alpha=0.7, edgecolors="none", s=40, label="Buses")
+    min_q = min(q_ref.min(), q_ctrl.min())
+    max_q = max(q_ref.max(), q_ctrl.max())
+    ax2.plot([min_q, max_q], [min_q, max_q], color="#5f6368", linestyle="--", alpha=0.7, label="y=x")
+    ax2.set_xlabel("Reference Injection (kVar)", fontsize=11)
+    ax2.set_ylabel("Control Injection (kVar)", fontsize=11)
+    ax2.set_title("Reactive Power Injection Comparison", fontsize=12, fontweight="bold")
+    ax2.grid(True, linestyle=":", alpha=0.6)
+    ax2.legend(loc="lower right")
+
+    try:
+        t_str = pd.to_datetime(str(t_val)).strftime("%H:%M")
+    except Exception:
+        t_str = str(t_val)
+
+    plt.suptitle(f"Individual Bus Power Comparison at Timestep {t_str}", fontsize=14, fontweight="bold", y=0.98)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+    logger.info(f"Saved power scatter plot to: {output_path}")

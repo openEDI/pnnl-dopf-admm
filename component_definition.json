@@ -57,6 +57,10 @@
         {
             "type": "",
             "port_id": "sdn_tol"
+        },
+        {
+            "type": "",
+            "port_id": "number_of_timesteps"
         }
     ],
     "dynamic_inputs": [

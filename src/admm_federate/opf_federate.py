@@ -116,6 +116,12 @@ class ComponentParameters(BaseModel):
     sdn_tol: float = Field(
         ge=0.0, title="Sdn Tol", description="Convergence tolerance for power mismatch"
     )
+    number_of_timesteps: int = Field(
+        default=0,
+        ge=0,
+        title="Number of Timesteps",
+        description="Total number of simulation timesteps. When > 0, the federate exits after this many steps.",
+    )
 
     model_config = {
         "title": "ADMMConfig",
@@ -679,6 +685,15 @@ class OPFFederate:
             granted_time = 0.0
             logger.debug("Step 0: Starting Time/Iter loop")
             while True:
+                if (
+                    self.static.number_of_timesteps > 0
+                    and granted_time >= self.static.number_of_timesteps
+                ):
+                    logger.info(
+                        f"Reached end time {self.static.number_of_timesteps}. "
+                        "Exiting loop."
+                    )
+                    break
                 request_time = granted_time + 1.0
                 logger.debug("Step 1: published initial values for iteration")
                 itr_flag = itr_need

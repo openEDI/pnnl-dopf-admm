@@ -31,6 +31,8 @@ try:
         plot_power_flow_comparison,
         plot_generation_adequacy,
         plot_algorithmic_convergence,
+        plot_voltage_scatter_at_timestep,
+        plot_power_scatter_at_timestep,
     )
 except ImportError as e:
     print(
@@ -165,6 +167,19 @@ def main() -> None:
     if fig_conv:
         fig_conv.savefig(output_dir / "admm_convergence.png", dpi=300, bbox_inches="tight")
         plt.close(fig_conv)
+
+    # 5. Save the scatter plots if reference data is available
+    plot_voltage_scatter_at_timestep(
+        data,
+        topology,
+        output_dir / "admm_voltage_scatter.png",
+        timestep_idx=-1
+    )
+    plot_power_scatter_at_timestep(
+        data,
+        output_dir / "admm_power_scatter.png",
+        timestep_idx=-1
+    )
 
     logger.info("Plot generation completed successfully.")
 
