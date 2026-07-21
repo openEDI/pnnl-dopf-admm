@@ -13,8 +13,8 @@
         "profile_location": "gadal_ieee123/profiles",
         "opendss_location": "gadal_ieee123/qsts",
         "feeder_file": "opendss/master.dss",
-        "start_date": "2018-05-01 12:00:00",
-        "number_of_timesteps": 5,
+        "start_date": "2018-05-01 08:00:00",
+        "number_of_timesteps": 8,
         "run_freq_sec": 3600,
         "topology_output": "../../outputs/topology.json",
         "buscoords_output": "../../outputs/Buscoords.dat"
@@ -32,8 +32,8 @@
         "profile_location": "gadal_ieee123/profiles",
         "opendss_location": "gadal_ieee123/qsts",
         "feeder_file": "opendss/master.dss",
-        "start_date": "2018-05-01 12:00:00",
-        "number_of_timesteps": 5,
+        "start_date": "2018-05-01 08:00:00",
+        "number_of_timesteps": 8,
         "run_freq_sec": 3600,
         "topology_output": "../../outputs/control_topology.json",
         "buscoords_output": "../../outputs/control_Buscoords.dat"
@@ -152,7 +152,7 @@
       "parameters": {
         "name": "hub_voltage",
         "max_itr": 10,
-        "number_of_timesteps": 5
+        "number_of_timesteps": 8
       }
     },
     {
@@ -163,7 +163,7 @@
       "image": "",
       "parameters": {
         "max_itr": 10,
-        "number_of_timesteps": 5
+        "number_of_timesteps": 8
       }
     },
     {
@@ -174,7 +174,7 @@
       "image": "",
       "parameters": {
         "max_itr": 10,
-        "number_of_timesteps": 5
+        "number_of_timesteps": 8
       }
     },
     {
@@ -188,7 +188,7 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "real",
+        "control_type": "reactive",
         "switches": [
           "sw2",
           "sw3"
@@ -199,7 +199,7 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 5
+        "number_of_timesteps": 8
       }
     },
     {
@@ -226,7 +226,7 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "real",
+        "control_type": "reactive",
         "switches": [
           "sw3"
         ],
@@ -236,7 +236,7 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 5
+        "number_of_timesteps": 8
       }
     },
     {
@@ -263,7 +263,7 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "real",
+        "control_type": "reactive",
         "switches": [
           "sw2",
           "sw4"
@@ -274,7 +274,7 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 5
+        "number_of_timesteps": 8
       }
     },
     {
@@ -301,7 +301,7 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "real",
+        "control_type": "reactive",
         "switches": [
           "sw4",
           "sw5"
@@ -312,7 +312,7 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 5
+        "number_of_timesteps": 8
       }
     },
     {
@@ -339,7 +339,7 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "real",
+        "control_type": "reactive",
         "switches": [
           "sw5"
         ],
@@ -349,7 +349,7 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 5
+        "number_of_timesteps": 8
       }
     },
     {

@@ -20,6 +20,7 @@ try:
     from oedisi.types.data_types import Topology
     from admm_federate.adapter import area_disconnects, disconnect_areas, generate_graph
     from admm_federate.plotting import (
+        configure_publication_style,
         load_scenario_parameters,
         get_der_mapping,
         load_recorder_data,
@@ -27,12 +28,14 @@ try:
         process_power_flows,
         process_generation_adequacy,
         process_convergence,
+        get_max_diff_timestep,
         plot_voltage_comparison,
         plot_power_flow_comparison,
         plot_generation_adequacy,
         plot_algorithmic_convergence,
         plot_voltage_scatter_at_timestep,
         plot_power_scatter_at_timestep,
+        plot_network_partition,
     )
 except ImportError as e:
     print(
@@ -42,9 +45,12 @@ except ImportError as e:
     )
     sys.exit(1)
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -81,6 +87,19 @@ def main() -> None:
     if not scenario_path.exists():
         logger.error(f"Scenario file does not exist: {scenario_path}")
         sys.exit(1)
+
+    # Extract model name and configure publication styles
+    stem = scenario_path.stem
+    if stem.startswith("pnnl_dopf_admm_"):
+        model = stem[len("pnnl_dopf_admm_"):]
+    elif stem == "pnnl_dopf_admm":
+        model = "default"
+    else:
+        model = stem
+
+    import seaborn as sns
+    sns.set_theme(style="whitegrid")
+    configure_publication_style()
 
     # 1. Load configuration and input models
     logger.info(f"Loading scenario configuration from: {scenario_path}")
@@ -125,6 +144,27 @@ def main() -> None:
         boundaries = area_disconnects(graph_for_partition, n_max=len(area_ids))
         areas_clean = disconnect_areas(graph_for_split, boundaries)
 
+        # Sort areas_clean to align with area_ids by matching source_bus
+        sorted_areas = [None] * len(area_ids)
+        unmatched = []
+        for area in areas_clean:
+            matched_aid = -1
+            for aid in area_ids:
+                params = area_params.get(aid, {})
+                source_bus = params.get("source_bus")
+                if source_bus and source_bus in area.nodes():
+                    matched_aid = aid
+                    break
+            if matched_aid != -1:
+                sorted_areas[matched_aid] = area
+            else:
+                unmatched.append(area)
+
+        for i in range(len(area_ids)):
+            if sorted_areas[i] is None and unmatched:
+                sorted_areas[i] = unmatched.pop(0)
+        areas_clean = [a for a in sorted_areas if a is not None] + unmatched
+
         area_buses = [list(area.nodes()) for area in areas_clean]
         der_map = get_der_mapping(topology_path)
     except Exception as e:
@@ -148,40 +188,66 @@ def main() -> None:
     logger.info("Generating and saving plots...")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    fig_volt = plot_voltage_comparison(voltage_data)
+    comparison_timestep = get_max_diff_timestep(data, topology)
+
+    fig_volt = plot_voltage_comparison(voltage_data, timestep=comparison_timestep)
     if fig_volt:
-        fig_volt.savefig(output_dir / "admm_voltage_comparison.png", dpi=300)
+        fig_volt.savefig(output_dir / f"admm_{model}_voltage_comparison.png", dpi=300)
+        fig_volt.savefig(output_dir / f"admm_{model}_voltage_comparison.eps")
         plt.close(fig_volt)
 
-    fig_flow = plot_power_flow_comparison(flow_data)
+    fig_flow = plot_power_flow_comparison(flow_data, timestep=comparison_timestep)
     if fig_flow:
-        fig_flow.savefig(output_dir / "admm_power_flow_comparison.png", dpi=300)
+        fig_flow.savefig(output_dir / f"admm_{model}_power_flow_comparison.png", dpi=300)
+        fig_flow.savefig(output_dir / f"admm_{model}_power_flow_comparison.eps")
         plt.close(fig_flow)
 
     fig_adeq = plot_generation_adequacy(adequacy_df)
     if fig_adeq:
-        fig_adeq.savefig(output_dir / "admm_generation_adequacy.png", dpi=300)
+        fig_adeq.savefig(output_dir / f"admm_{model}_generation_adequacy.png", dpi=300)
+        fig_adeq.savefig(output_dir / f"admm_{model}_generation_adequacy.eps")
         plt.close(fig_adeq)
 
     fig_conv = plot_algorithmic_convergence(convergence_data)
     if fig_conv:
-        fig_conv.savefig(output_dir / "admm_convergence.png", dpi=300, bbox_inches="tight")
+        fig_conv.savefig(output_dir / f"admm_{model}_convergence.png", dpi=300, bbox_inches="tight")
+        fig_conv.savefig(output_dir / f"admm_{model}_convergence.eps", bbox_inches="tight")
         plt.close(fig_conv)
 
     # 5. Save the scatter plots if reference data is available
-    plot_voltage_scatter_at_timestep(
+    fig_volt_scatter = plot_voltage_scatter_at_timestep(
         data,
         topology,
-        output_dir / "admm_voltage_scatter.png",
-        timestep_idx=-1
+        timestep_val=comparison_timestep
     )
-    plot_power_scatter_at_timestep(
-        data,
-        output_dir / "admm_power_scatter.png",
-        timestep_idx=-1
-    )
+    if fig_volt_scatter:
+        fig_volt_scatter.savefig(output_dir / f"admm_{model}_voltage_scatter.png", dpi=300)
+        fig_volt_scatter.savefig(output_dir / f"admm_{model}_voltage_scatter.eps")
+        plt.close(fig_volt_scatter)
 
-    logger.info("Plot generation completed successfully.")
+    fig_power_scatter = plot_power_scatter_at_timestep(
+        data,
+        timestep_val=comparison_timestep
+    )
+    if fig_power_scatter:
+        fig_power_scatter.savefig(output_dir / f"admm_{model}_power_scatter.png", dpi=300)
+        fig_power_scatter.savefig(output_dir / f"admm_{model}_power_scatter.eps")
+        plt.close(fig_power_scatter)
+
+    # 6. Generate and save the network partition plot
+    fig_partition = plot_network_partition(
+        G,
+        boundaries,
+        areas_clean,
+        slack_bus,
+        coords_dir=topology_path.parent
+    )
+    if fig_partition:
+        fig_partition.savefig(output_dir / f"admm_{model}_network_partition.png", dpi=300)
+        fig_partition.savefig(output_dir / f"admm_{model}_network_partition.eps")
+        plt.close(fig_partition)
+
+    print(f"\nAll timestep-dependent plots were generated for timestep: {comparison_timestep}")
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ SMART_DS = {
     "SFO/P1U": "p1uhs0_1247/p1uhs0_1247--p1udt942",
 }
 
-T_STEPS = 4
+T_STEPS = 8
 DELTA_T = 60 * 60  # minutes * seconds per hour
 
 
@@ -210,34 +210,40 @@ def plot_network(
     plt.close()
 
 
-def generate_feeder_ieee(OUTPUTS: str) -> Component:
+def generate_feeder_ieee(OUTPUTS: str, is_control: bool = False) -> Component:
     smart_ds = False
     base = "gadal_ieee123"
     profiles = f"{base}/profiles"
     opendss = f"{base}/qsts"
     file = "opendss/master.dss"
 
+    name = "control_feeder" if is_control else "reference_feeder"
+    port = 5601 if is_control else 5600
+    suffix = "control_" if is_control else ""
+
     return Component(
-        name="feeder",
+        name=name,
         type="Feeder",
         host="feeder",
-        container_port=5600,
+        container_port=port,
         parameters={
             "use_smartds": smart_ds,
             "use_sparse_admittance": True,
             "profile_location": profiles,
             "opendss_location": opendss,
             "feeder_file": file,
-            "start_date": "2018-05-01 10:00:00",
+            "start_date": "2018-05-01 08:00:00",
             "number_of_timesteps": T_STEPS,
             "run_freq_sec": DELTA_T,
-            "topology_output": f"{OUTPUTS}/topology.json",
+            "topology_output": f"{OUTPUTS}/{suffix}topology.json",
             "buscoords_output": f"{OUTPUTS}/Buscoords.dat",
         },
     )
 
 
-def generate_feeder_smartds(MODEL: str, LEVEL: str, OUTPUTS: str) -> Component:
+def generate_feeder_smartds(
+    MODEL: str, LEVEL: str, OUTPUTS: str, is_control: bool = False
+) -> Component:
     smart_ds = True
     base = f"SMART-DS/v1.0/2018/{MODEL}"
     scenario = f"scenarios/solar_{LEVEL}_batteries_none_timeseries"
@@ -245,39 +251,50 @@ def generate_feeder_smartds(MODEL: str, LEVEL: str, OUTPUTS: str) -> Component:
     opendss = f"{base}/{scenario}/opendss/{SMART_DS[MODEL]}"
     file = "opendss/Master.dss"
 
+    name = "control_feeder" if is_control else "reference_feeder"
+    port = 5601 if is_control else 5600
+    suffix = "control_" if is_control else ""
+
     return Component(
-        name="feeder",
+        name=name,
         type="Feeder",
         host="feeder",
-        container_port=5600,
+        container_port=port,
         parameters={
             "use_smartds": smart_ds,
             "use_sparse_admittance": True,
             "profile_location": profiles,
             "opendss_location": opendss,
             "feeder_file": file,
-            "start_date": "2018-05-01 00:00:00",
+            "start_date": "2018-05-01 08:00:00",
             "number_of_timesteps": T_STEPS,
             "run_freq_sec": DELTA_T,
-            "topology_output": f"{OUTPUTS}/topology.json",
+            "topology_output": f"{OUTPUTS}/{suffix}topology.json",
             "buscoords_output": f"{OUTPUTS}/Buscoords.dat",
         },
     )
 
 
-def generate_feeder(MODEL: str, LEVEL: str, OUTPUTS: str) -> Component:
+def generate_feeder(
+    MODEL: str, LEVEL: str, OUTPUTS: str, is_control: bool = False
+) -> Component:
     if "ieee" in MODEL.lower():
-        return generate_feeder_ieee(OUTPUTS)
+        return generate_feeder_ieee(OUTPUTS, is_control)
     else:
-        return generate_feeder_smartds(MODEL, LEVEL, OUTPUTS)
+        return generate_feeder_smartds(MODEL, LEVEL, OUTPUTS, is_control)
 
 
 def generate_recorder(port: str, src: str, OUTPUTS: str) -> tuple[Component, Link]:
-    name = f"recorder_{port}_{src}"
-    file = f"{port}_{src}"
-    if src == "feeder":
+    if src == "reference_feeder":
+        name = f"recorder_reference_{port}"
+        singular_port = port.replace("voltages", "voltage").replace("powers", "power")
+        file = f"reference_{singular_port}"
+    elif src == "control_feeder":
         name = f"recorder_{port}"
         file = port
+    else:
+        name = f"recorder_{port}_{src}"
+        file = f"{port}_{src}"
 
     component = Component(
         name=name,
@@ -287,7 +304,6 @@ def generate_recorder(port: str, src: str, OUTPUTS: str) -> tuple[Component, Lin
         parameters={
             "feather_filename": f"{OUTPUTS}/{file}.feather",
             "csv_filename": f"{OUTPUTS}/{file}.csv",
-            "number_of_timesteps": T_STEPS,
             "deltat": DELTA_T,
         },
     )
@@ -522,17 +538,21 @@ def generate_for_model(
     )
 
     if "ieee" in model_dir.lower():
-        feeder = generate_feeder("ieee123", "", OUTPUTS)
+        reference_feeder = generate_feeder("ieee123", "", OUTPUTS, is_control=False)
+        control_feeder = generate_feeder("ieee123", "", OUTPUTS, is_control=True)
     else:
         model, level = parse_model_dir(model_dir)
         if not model:
             print(f"Skipping SMART-DS generation for unrecognized folder: {model_dir}")
             return
-        feeder = generate_feeder(model, level, OUTPUTS)
+        reference_feeder = generate_feeder(model, level, OUTPUTS, is_control=False)
+        control_feeder = generate_feeder(model, level, OUTPUTS, is_control=True)
 
-    system.components.append(feeder)
+    system.components.append(reference_feeder)
+    system.components.append(control_feeder)
 
-    link_feeder(system, feeder)
+    link_feeder(system, reference_feeder)
+    link_feeder(system, control_feeder)
 
     switch_map = {}
     source_bus_map = {}
@@ -573,6 +593,7 @@ def generate_for_model(
         parameters={
             "name": "hub_voltage",
             "max_itr": max_itr,
+            "number_of_timesteps": T_STEPS,
         },
     )
     system.components.append(hub_voltage)
@@ -584,6 +605,7 @@ def generate_for_model(
         container_port=None,
         parameters={
             "max_itr": max_itr,
+            "number_of_timesteps": T_STEPS,
         },
     )
     system.components.append(hub_power)
@@ -595,6 +617,7 @@ def generate_for_model(
         container_port=None,
         parameters={
             "max_itr": max_itr,
+            "number_of_timesteps": T_STEPS,
         },
     )
     system.components.append(hub_control)
@@ -603,7 +626,7 @@ def generate_for_model(
         Link(
             source=hub_control.name,
             source_port="pub_c",
-            target=feeder.name,
+            target=control_feeder.name,
             target_port="change_commands",
         )
     )
@@ -627,7 +650,7 @@ def generate_for_model(
                 "sdn_tol": 0.01,
                 "max_itr": max_itr,
                 "relaxed": False,
-                "control_type": "real",
+                "control_type": "reactive" if "ieee" in model_dir.lower() else "real",
                 "switches": switch_map[k],
                 "source_bus": source_bus_map[k],
                 "source_line": source_line_map[k],
@@ -635,10 +658,11 @@ def generate_for_model(
                 "rho_sup": 0,
                 "rho_vdn": 0,
                 "rho_sdn": rho_sdn[k],
+                "number_of_timesteps": T_STEPS,
             },
         )
         system.components.append(algo)
-        link_algo(system, algo, feeder)
+        link_algo(system, algo, control_feeder)
 
     with open(f"{SCENARIOS}/{system.name}.json", "w") as f:
         f.write(system.model_dump_json())
@@ -659,7 +683,11 @@ def generate_for_model(
     for c in system.components:
         name = c.name
         print("Linking Component: ", name)
-        if "hub" in name:
+        if c.type == "Feeder":
+            components[c.type] = "feeder_federate/component_definition.json"
+        elif c.type == "Recorder":
+            components[c.type] = "recorder_federate/component_definition.json"
+        elif "hub" in name:
             components[c.type] = f"{name}/component_definition.json"
         elif "_" in name:
             base_name, _ = name.split("_", 1)
