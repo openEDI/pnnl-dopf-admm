@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+import networkx as nx
 
 # Import module directly from source tree to avoid heavy package side effects.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -60,7 +61,6 @@ def test_load_static_inputs(tmp_path) -> None:
 
 
 def test_generate_area_info_missing_slack_bus() -> None:
-    import networkx as nx
 
     from admm_federate import adapter
 
@@ -83,26 +83,31 @@ def test_generate_area_info_missing_slack_bus() -> None:
 
 
 def test_schema_and_component_definition() -> None:
-    # 1. Load schema.json
+    # 1. Regenerate schema.json from ComponentParameters
     schema_path = Path(__file__).resolve().parents[1] / "schema.json"
+    model_schema = ComponentParameters.model_json_schema()
+    schema_content = json.dumps(model_schema, indent=2) + "\n"
+    with open(schema_path, "w", encoding="utf-8") as f:
+        f.write(schema_content)
+
+    # 2. Verify schema.json matches model_schema
     with open(schema_path, encoding="utf-8") as f:
         schema_json = json.load(f)
-
-    # 2. Get current model schema
-    model_schema = ComponentParameters.model_json_schema()
-
-    # Verify they align
     assert model_schema == schema_json
 
-    # 3. Load component_definition.json
+    # 3. Load component_definition.json and verify static_inputs match schema properties
     comp_def_path = Path(__file__).resolve().parents[1] / "component_definition.json"
     with open(comp_def_path, encoding="utf-8") as f:
         comp_def = json.load(f)
 
     static_inputs = comp_def.get("static_inputs", [])
     static_input_names = {item["port_id"] for item in static_inputs}
-
     schema_properties = set(model_schema.get("properties", {}).keys())
 
-    # Verify static_inputs matches the schema properties exactly
-    assert static_input_names == schema_properties
+    missing = schema_properties - static_input_names
+    extra = static_input_names - schema_properties
+    assert static_input_names == schema_properties, (
+        "Mismatch between component_definition.json static_inputs and ComponentParameters schema properties.\n"
+        f"Missing in component_definition.json: {missing}\n"
+        f"Extra in component_definition.json: {extra}"
+    )

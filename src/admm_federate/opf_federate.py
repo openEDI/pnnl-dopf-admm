@@ -761,10 +761,6 @@ class OPFFederate:
 
 
 def run_simulator(broker_config: BrokerConfig) -> None:
-    schema = json.dumps(ComponentParameters.model_json_schema(), indent=2)
-    with open("./schema.json", "w") as f:
-        f.write(schema)
-
     sfed = OPFFederate(broker_config)
     sfed.run()
 

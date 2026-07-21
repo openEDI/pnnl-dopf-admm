@@ -84,6 +84,13 @@
       "minimum": 0.0,
       "title": "Sdn Tol",
       "type": "number"
+    },
+    "number_of_timesteps": {
+      "default": 0,
+      "description": "Total number of simulation timesteps. When > 0, the federate exits after this many steps.",
+      "minimum": 0,
+      "title": "Number of Timesteps",
+      "type": "integer"
     }
   },
   "required": [
