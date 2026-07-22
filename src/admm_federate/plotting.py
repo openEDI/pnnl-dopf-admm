@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -130,9 +131,15 @@ def load_scenario_parameters(
     area_params: dict[int, dict[str, Any]] = {}
     for comp in scenario_dict.get("components", []):
         comp_name = comp.get("name", "")
-        if comp_name.startswith("pnnl_dopf_admm_"):
-            try:
-                area_id = int(comp_name.split("_")[-1])
+        comp_type = comp.get("type", "")
+        if (
+            comp_type == "PnnlDopfAdmmComponent"
+            or comp_name.startswith("pnnl_dopf_admm_")
+            or re.match(r"^area\d+$", comp_name)
+        ):
+            m = re.search(r"\d+$", comp_name)
+            if m:
+                area_id = int(m.group())
                 area_ids.append(area_id)
                 params = comp.get("parameters", {})
                 area_params[area_id] = {
@@ -140,8 +147,6 @@ def load_scenario_parameters(
                     "source_line": params.get("source_line"),
                     "switches": params.get("switches", []),
                 }
-            except ValueError:
-                continue
     area_ids.sort()
     return area_ids, area_params
 
@@ -229,6 +234,13 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
 
         filename = Path(feather_filename).name
         file_path = data_dir / filename
+        run_dir = data_dir.parent if data_dir.name == "outputs" else data_dir
+        if not file_path.exists():
+            file_path = run_dir / "build" / name / filename
+        if not file_path.exists():
+            matches = list(run_dir.rglob(filename))
+            if matches:
+                file_path = matches[0]
 
         key = None
         link_info = incoming_links.get(name)
@@ -262,9 +274,14 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
                     key = "feeder_p_real"
                 elif source_port == "powers_imag":
                     key = "feeder_p_imag"
-            elif source and source.startswith("pnnl_dopf_admm_"):
-                try:
-                    aid = int(source.split("_")[-1])
+            elif source and (
+                source.startswith("pnnl_dopf_admm_")
+                or source.startswith("area")
+                or source.startswith("stats")
+            ):
+                m = re.search(r"\d+$", source)
+                if m:
+                    aid = int(m.group())
                     if source_port == "voltages_mag":
                         key = f"area_{aid}_v_mag"
                     elif source_port == "powers_mag":
@@ -277,8 +294,6 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
                         key = f"area_{aid}_ctrl_imag"
                     elif source_port == "solver_stats":
                         key = f"area_{aid}_stats"
-                except ValueError:
-                    pass
 
         if key:
             if file_path.exists():
@@ -857,7 +872,15 @@ def plot_voltage_comparison(
         mpatches.Patch(color="#b0bec5", label="Reference Feeder"),
         mpatches.Patch(color="#7f7f7f", label="Control Feeder (Colored by Area)"),
     ]
-    ax.legend(handles=legend_elements, loc="best")
+    ax.legend(
+        handles=legend_elements,
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        borderaxespad=0.0,
+        framealpha=0.95,
+        facecolor="white",
+        edgecolor="#DDE3EC",
+    )
 
     return fig
 
@@ -941,7 +964,15 @@ def plot_power_flow_comparison(
         mpatches.Patch(color="#b0bec5", label="Reference"),
         mpatches.Patch(color="#7f7f7f", label="Control (Colored by Area)"),
     ]
-    ax.legend(handles=legend_elements, loc="best")
+    ax.legend(
+        handles=legend_elements,
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        borderaxespad=0.0,
+        framealpha=0.95,
+        facecolor="white",
+        edgecolor="#DDE3EC",
+    )
     plt.xticks(rotation=45, ha="right")
     return fig
 
@@ -990,7 +1021,15 @@ def plot_generation_adequacy(
         mpatches.Patch(color="#b0bec5", label="Rated Load"),
         mpatches.Patch(color="#7f7f7f", label="Rated Generation (Colored by Area)"),
     ]
-    ax.legend(handles=legend_elements, loc="best")
+    ax.legend(
+        handles=legend_elements,
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        borderaxespad=0.0,
+        framealpha=0.95,
+        facecolor="white",
+        edgecolor="#DDE3EC",
+    )
     return fig
 
 
@@ -1089,9 +1128,11 @@ def plot_algorithmic_convergence(
         handles=legend_handles,
         labels=legend_labels,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.02),
+        bbox_to_anchor=(0.5, 1.08),
         ncol=len(areas) + 1,
-        title="Area ID",
+        frameon=True,
+        facecolor="white",
+        edgecolor="#DDE3EC",
     )
     return fig
 
@@ -1240,7 +1281,15 @@ def plot_network_partition(
             )
         )
 
-    ax.legend(handles=legend_elements, loc="best")
+    ax.legend(
+        handles=legend_elements,
+        bbox_to_anchor=(1.02, 1),
+        loc="upper left",
+        borderaxespad=0.0,
+        framealpha=0.95,
+        facecolor="white",
+        edgecolor="#DDE3EC",
+    )
     ax.axis("off")
     return fig
 
