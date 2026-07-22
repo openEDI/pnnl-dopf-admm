@@ -27,7 +27,7 @@ dependencies = [
 	"OpenDSSDirect.py[extras]==0.7.0",
 	"boto3",
 	"xarray",
-	"oedisi~=3.0",
+	"oedisi @ git+https://github.com/Tylores/oedisi.git@bugfix/ignore-dotfiles-copy",
 	"bokeh",
 	"networkx",
 ]
