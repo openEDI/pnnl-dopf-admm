@@ -21,11 +21,12 @@ from admm_federate.adapter import (
     reconnect_area_switches,
 )
 
-ROOT = os.getcwd()
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+COMPONENT_DIR = os.path.dirname(SCRIPT_DIR)
 ALGO = "pnnl_dopf_admm"
 NAME = ""
-OUTPUTS = ""
-SCENARIOS = ""
+OUTPUTS = "../../outputs"
+SCENARIOS = os.path.join(COMPONENT_DIR, "scenarios")
 
 SMART_DS = {
     "SFO/P1U": "p1uhs0_1247/p1uhs0_1247--p1udt942",
@@ -346,24 +347,24 @@ def generate_sensor(port: str, src: str) -> tuple[Component, Link]:
     return (component, link)
 
 
-def link_feeder(system: WiringDiagram, feeder: Component) -> None:
+def link_feeder(system: WiringDiagram, feeder: Component, outputs: str) -> None:
     port = "voltages_real"
-    component, link = generate_recorder(port, feeder.name, OUTPUTS)
+    component, link = generate_recorder(port, feeder.name, outputs)
     system.components.append(component)
     system.links.append(link)
 
     port = "voltages_imag"
-    component, link = generate_recorder(port, feeder.name, OUTPUTS)
+    component, link = generate_recorder(port, feeder.name, outputs)
     system.components.append(component)
     system.links.append(link)
 
     port = "powers_real"
-    component, link = generate_recorder(port, feeder.name, OUTPUTS)
+    component, link = generate_recorder(port, feeder.name, outputs)
     system.components.append(component)
     system.links.append(link)
 
     port = "powers_imag"
-    component, link = generate_recorder(port, feeder.name, OUTPUTS)
+    component, link = generate_recorder(port, feeder.name, outputs)
     system.components.append(component)
     system.links.append(link)
 
@@ -463,7 +464,7 @@ def link_hub_control(system: WiringDiagram, hub: Component, src: int) -> None:
     )
 
 
-def link_algo(system: WiringDiagram, algo: Component, feeder: Component) -> None:
+def link_algo(system: WiringDiagram, algo: Component, feeder: Component, outputs: str) -> None:
     port = "voltages_real"
     system.links.append(
         Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
@@ -485,32 +486,7 @@ def link_algo(system: WiringDiagram, algo: Component, feeder: Component) -> None
     )
 
     port = "solver_stats"
-    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    system.components.append(component)
-    system.links.append(link)
-
-    port = "voltages_mag"
-    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    system.components.append(component)
-    system.links.append(link)
-
-    port = "powers_mag"
-    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    system.components.append(component)
-    system.links.append(link)
-
-    port = "powers_ang"
-    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    system.components.append(component)
-    system.links.append(link)
-
-    port = "controls_real"
-    component, link = generate_recorder(port, algo.name, OUTPUTS)
-    system.components.append(component)
-    system.links.append(link)
-
-    port = "controls_imag"
-    component, link = generate_recorder(port, algo.name, OUTPUTS)
+    component, link = generate_recorder(port, algo.name, outputs)
     system.components.append(component)
     system.links.append(link)
 
@@ -537,22 +513,26 @@ def generate_for_model(
         name=f"{ALGO}_{model_dir}_{num_areas}", components=[], links=[]
     )
 
+    scenario_outputs = f"{OUTPUTS}/{system.name}"
+    abs_scenario_outputs = os.path.abspath(os.path.join(COMPONENT_DIR, scenario_outputs))
+    os.makedirs(abs_scenario_outputs, exist_ok=True)
+
     if "ieee" in model_dir.lower():
-        reference_feeder = generate_feeder("ieee123", "", OUTPUTS, is_control=False)
-        control_feeder = generate_feeder("ieee123", "", OUTPUTS, is_control=True)
+        reference_feeder = generate_feeder("ieee123", "", scenario_outputs, is_control=False)
+        control_feeder = generate_feeder("ieee123", "", scenario_outputs, is_control=True)
     else:
         model, level = parse_model_dir(model_dir)
         if not model:
             print(f"Skipping SMART-DS generation for unrecognized folder: {model_dir}")
             return
-        reference_feeder = generate_feeder(model, level, OUTPUTS, is_control=False)
-        control_feeder = generate_feeder(model, level, OUTPUTS, is_control=True)
+        reference_feeder = generate_feeder(model, level, scenario_outputs, is_control=False)
+        control_feeder = generate_feeder(model, level, scenario_outputs, is_control=True)
 
     system.components.append(reference_feeder)
     system.components.append(control_feeder)
 
-    link_feeder(system, reference_feeder)
-    link_feeder(system, control_feeder)
+    link_feeder(system, reference_feeder, scenario_outputs)
+    link_feeder(system, control_feeder, scenario_outputs)
 
     switch_map = {}
     source_bus_map = {}
@@ -662,7 +642,7 @@ def generate_for_model(
             },
         )
         system.components.append(algo)
-        link_algo(system, algo, control_feeder)
+        link_algo(system, algo, control_feeder, scenario_outputs)
 
     with open(f"{SCENARIOS}/{system.name}.json", "w") as f:
         f.write(system.model_dump_json())
@@ -700,9 +680,6 @@ def generate_for_model(
 
 
 def generate(num_areas: int = 5) -> None:
-    global OUTPUTS
-    OUTPUTS = "../../outputs"
-    SCENARIOS = f"{ROOT}/scenarios"
     os.makedirs(SCENARIOS, exist_ok=True)
 
     for item in os.listdir(SCENARIOS):

@@ -42,42 +42,64 @@ def format_time_val(time_val: Any) -> str:
         return str(time_val)
 
 
-def configure_publication_style(font_family: str = "serif", base_font_size: float = 9.0) -> None:
-    """Set global Matplotlib rcParams for publication-quality figures."""
+def set_ieee_style() -> None:
+    """Apply IEEE publication-quality style settings."""
     import matplotlib as mpl
     mpl.rcParams.update({
-        # High baseline resolution for previews/saves
-        "figure.dpi": 300,
-        "figure.constrained_layout.use": True,
-        
-        # Typography (Match your journal's body font)
-        "font.family": font_family,
-        "font.size": base_font_size,                     # Typically 8pt-10pt for journals
-        "axes.labelsize": base_font_size,
-        "axes.titlesize": base_font_size + 1.0,
-        "legend.fontsize": base_font_size - 1.0,
-        "xtick.labelsize": base_font_size - 1.0,
-        "ytick.labelsize": base_font_size - 1.0,
-        
-        # Vector Font Export Settings
-        "pdf.fonttype": 42,                 # Embeds true fonts into PDF output
-        "ps.fonttype": 42,                  # Embeds true fonts into PostScript output
-        "text.usetex": False,               # Set True if you have a local LaTeX engine
-        
-        # Line Weights & Geometries
-        "axes.linewidth": 0.5,              # Thin crisp borders
-        "lines.linewidth": 1.0,             # Clear data tracking lines
-        "lines.markersize": 3.0,            # Legible, uncrowded data markers
-        "patch.linewidth": 0.5,
-        
-        # Ticks Placement
-        "xtick.direction": "in",            # Ticks point inward or outward cleanly
+        # ---- Figure ----
+        "figure.figsize": (3.5, 2.5),   # Single column width (inches)
+        "figure.dpi": 300,               # High resolution
+        "figure.autolayout": True,       # Auto tight_layout
+        "savefig.dpi": 300,
+        "savefig.bbox": "tight",
+        "savefig.pad_inches": 0.02,
+
+        # ---- Fonts (IEEE uses Times) ----
+        "font.family": "serif",
+        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+        "font.size": 8,                  # Base font size
+        "axes.titlesize": 9,
+        "axes.labelsize": 8,
+        "xtick.labelsize": 7,
+        "ytick.labelsize": 7,
+        "legend.fontsize": 7,
+
+        # ---- Math text (matches serif) ----
+        "mathtext.fontset": "stix",      # Times-like math font
+
+        # ---- Lines and markers ----
+        "lines.linewidth": 1.0,
+        "lines.markersize": 3,
+
+        # ---- Axes ----
+        "axes.linewidth": 0.5,
+        "axes.grid": True,
+        "grid.linewidth": 0.4,
+        "grid.alpha": 0.5,
+
+        # ---- Ticks ----
+        "xtick.direction": "in",
         "ytick.direction": "in",
-        "xtick.major.size": 3,
         "xtick.major.width": 0.5,
-        "ytick.major.size": 3,
         "ytick.major.width": 0.5,
+        "xtick.minor.visible": True,
+        "ytick.minor.visible": True,
+
+        # ---- Legend ----
+        "legend.frameon": True,
+        "legend.framealpha": 0.9,
+        "legend.edgecolor": "0.8",
+        "legend.fancybox": False,
+
+        # ---- Vector Font Export Settings ----
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
     })
+
+
+def configure_publication_style(font_family: str = "serif", base_font_size: float = 8.0) -> None:
+    """Set global Matplotlib rcParams for publication-quality figures."""
+    set_ieee_style()
 
 
 def get_publication_figsize(
@@ -857,12 +879,10 @@ def plot_voltage_comparison(
             area_idx = idx // 2
             coll.set_facecolor(AREA_COLORS[area_idx % len(AREA_COLORS)])
 
-    ax.axhline(
-        1.05, color="r", linestyle="--", label="Upper Limit (1.05 p.u.)"
+    limit_line = ax.axhline(
+        1.05, color="r", linestyle="--", label="Voltage Limits"
     )
-    ax.axhline(
-        0.95, color="r", linestyle="--", label="Lower Limit (0.95 p.u.)"
-    )
+    ax.axhline(0.95, color="r", linestyle="--")
 
     ax.set_xlabel("Control Area")
     ax.set_ylabel("Voltage Magnitude (p.u.)")
@@ -871,16 +891,9 @@ def plot_voltage_comparison(
     legend_elements = [
         mpatches.Patch(color="#b0bec5", label="Reference Feeder"),
         mpatches.Patch(color="#7f7f7f", label="Control Feeder (Colored by Area)"),
+        limit_line,
     ]
-    ax.legend(
-        handles=legend_elements,
-        bbox_to_anchor=(1.02, 1),
-        loc="upper left",
-        borderaxespad=0.0,
-        framealpha=0.95,
-        facecolor="white",
-        edgecolor="#DDE3EC",
-    )
+    ax.legend(handles=legend_elements, loc="best")
 
     return fig
 
@@ -964,16 +977,8 @@ def plot_power_flow_comparison(
         mpatches.Patch(color="#b0bec5", label="Reference"),
         mpatches.Patch(color="#7f7f7f", label="Control (Colored by Area)"),
     ]
-    ax.legend(
-        handles=legend_elements,
-        bbox_to_anchor=(1.02, 1),
-        loc="upper left",
-        borderaxespad=0.0,
-        framealpha=0.95,
-        facecolor="white",
-        edgecolor="#DDE3EC",
-    )
-    plt.xticks(rotation=45, ha="right")
+    ax.legend(handles=legend_elements, loc="best")
+    plt.xticks(rotation=0)
     return fig
 
 
@@ -1021,15 +1026,7 @@ def plot_generation_adequacy(
         mpatches.Patch(color="#b0bec5", label="Rated Load"),
         mpatches.Patch(color="#7f7f7f", label="Rated Generation (Colored by Area)"),
     ]
-    ax.legend(
-        handles=legend_elements,
-        bbox_to_anchor=(1.02, 1),
-        loc="upper left",
-        borderaxespad=0.0,
-        framealpha=0.95,
-        facecolor="white",
-        edgecolor="#DDE3EC",
-    )
+    ax.legend(handles=legend_elements, loc="best")
     return fig
 
 
@@ -1043,7 +1040,7 @@ def plot_algorithmic_convergence(
         return None
 
     if figsize is None:
-        figsize = get_publication_figsize("double", 0.45)
+        figsize = get_publication_figsize("single", 1.2)
 
     records = []
     for aid, df in convergence_data.items():
@@ -1068,7 +1065,7 @@ def plot_algorithmic_convergence(
     df_plot = pd.DataFrame(records)
     df_plot = df_plot.sort_values(by="time")
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize, sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
     colors = AREA_COLORS
 
     areas = sorted(df_plot["Area"].unique(), key=lambda x: int(x.split()[-1]))
@@ -1084,22 +1081,22 @@ def plot_algorithmic_convergence(
             aid = 0
         color = colors[aid % len(colors)]
         
-        # Plot Optimality Gap (Left)
+        # Plot Optimality Gap (Top)
         line_opt = ax1.semilogy(
             df_area["time"],
             df_area["Optimality Gap"],
             "o-",
             color=color,
-            linewidth=1.5,
+            linewidth=1.0,
         )
         
-        # Plot Feasibility Gap (Right)
+        # Plot Feasibility Gap (Bottom)
         ax2.semilogy(
             df_area["time"],
             df_area["Feasibility Gap"],
             "s-",
             color=color,
-            linewidth=1.5,
+            linewidth=1.0,
         )
         
         legend_handles.append(line_opt[0])
@@ -1112,46 +1109,68 @@ def plot_algorithmic_convergence(
     legend_handles.append(tol_line)
     legend_labels.append("Tolerance")
 
-    ax1.set_title("Optimality Gap")
-    ax2.set_title("Feasibility Gap")
-
-    ax1.set_xlabel("Simulation Time (HH:MM)")
-    ax2.set_xlabel("Simulation Time (HH:MM)")
     ax1.set_ylabel("Optimality Gap")
     ax2.set_ylabel("Feasibility Gap")
+    ax2.set_xlabel("Simulation Time (HH:MM)")
 
     for ax in [ax1, ax2]:
-        ax.tick_params(axis="x", labelrotation=15)
         ax.grid(True, which="both", linestyle=":")
 
-    fig.legend(
-        handles=legend_handles,
-        labels=legend_labels,
-        loc="upper center",
-        bbox_to_anchor=(0.5, 1.08),
-        ncol=len(areas) + 1,
-        frameon=True,
-        facecolor="white",
-        edgecolor="#DDE3EC",
-    )
+    plt.setp(ax2.get_xticklabels(), rotation=15, ha="right")
+
+    ax1.legend(handles=legend_handles, labels=legend_labels, loc="best")
+    fig.subplots_adjust(hspace=0.25)
     return fig
 
 
-def load_coordinates(coords_dir: str | Path) -> dict[str, tuple[float, float]]:
-    """Load coordinates from standard OpenDSS files in the coords directory."""
-    for filename in ["Buscoords.dat", "Buscoords.dss"]:
-        path = os.path.join(coords_dir, filename)
-        if os.path.exists(path):
-            coords = {}
-            with open(path) as f:
+def load_coordinates(
+    coords_dir: str | Path | None = None,
+    scenario_path: str | Path | None = None,
+) -> dict[str, tuple[float, float]]:
+    """Load OpenDSS bus coordinates matching the scenario feeder model."""
+    candidate_paths: list[Path] = []
+
+    if scenario_path:
+        scen_path = Path(scenario_path).resolve()
+        scen_dir = scen_path.parent
+
+        # Extract model folder from scenario stem (e.g., pnnl_dopf_admm_ieee123_5 -> ieee123)
+        stem = scen_path.stem.replace("pnnl_dopf_admm_", "")
+        model_name = stem.rsplit("_", 1)[0] if "_" in stem else stem
+
+        model_dir = scen_dir / model_name
+        for fn in ["Buscoords.dss", "Buscoords.dat", "buscoords.dss", "buscoords.dat"]:
+            candidate_paths.append(model_dir / fn)
+
+        # Also inspect component parameters in scenario JSON for opendss_location / profile_location
+        try:
+            with open(scen_path, encoding="utf-8") as f:
+                scen_dict = json.load(f)
+            for comp in scen_dict.get("components", []):
+                params = comp.get("parameters", {})
+                for k in ["opendss_location", "profile_location"]:
+                    val = params.get(k, "")
+                    if val:
+                        folder = val.split("/")[0].replace("gadal_", "")
+                        for fn in ["Buscoords.dss", "Buscoords.dat"]:
+                            candidate_paths.append(scen_dir / folder / fn)
+        except Exception:
+            pass
+
+    if coords_dir:
+        c_dir = Path(coords_dir).resolve()
+        for fn in ["Buscoords.dss", "Buscoords.dat", "buscoords.dss", "buscoords.dat"]:
+            candidate_paths.append(c_dir / fn)
+
+    for f_path in candidate_paths:
+        if f_path.exists():
+            coords: dict[str, tuple[float, float]] = {}
+            with open(f_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith("//") or line.startswith("!"):
                         continue
-                    if "," in line:
-                        parts = [p.strip() for p in line.split(",")]
-                    else:
-                        parts = line.split()
+                    parts = [p.strip() for p in line.split(",")] if "," in line else line.split()
                     if len(parts) >= 3:
                         bus = parts[0].strip("'\"")
                         try:
@@ -1161,7 +1180,9 @@ def load_coordinates(coords_dir: str | Path) -> dict[str, tuple[float, float]]:
                         except ValueError:
                             pass
             if coords:
+                logger.info(f"Loaded {len(coords)} bus coordinates from {f_path}")
                 return coords
+
     return {}
 
 
@@ -1170,16 +1191,17 @@ def plot_network_partition(
     boundaries: list,
     areas_clean: list[nx.Graph],
     slack_bus: str,
-    coords_dir: str | Path,
+    coords_dir: str | Path | None = None,
+    scenario_path: str | Path | None = None,
     figsize: tuple[float, float] | None = None,
 ) -> plt.Figure:
     """Generate the network partition map showing control areas and boundary switches."""
     if figsize is None:
-        figsize = get_publication_figsize("double", "square")
+        figsize = get_publication_figsize("single", "square")
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    coords = load_coordinates(coords_dir)
+    coords = load_coordinates(coords_dir, scenario_path=scenario_path)
     if coords:
         coords_upper = {k.upper(): v for k, v in coords.items()}
         pos = {
@@ -1205,12 +1227,8 @@ def plot_network_partition(
     colors = AREA_COLORS
     node_colors = [colors[node_to_area.get(node, 0) % len(colors)] for node in G.nodes()]
 
-    nx.draw_networkx_edges(G, pos, edge_color="lightgray", width=1.5, ax=ax)
-    nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=50, ax=ax)
-
-    y_vals = [p[1] for p in pos.values()]
-    y_range = max(y_vals) - min(y_vals) if y_vals else 1.0
-    offset_y = y_range * 0.02
+    nx.draw_networkx_edges(G, pos, edge_color="lightgray", width=0.8, ax=ax)
+    nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=12, ax=ax)
 
     for u, v, a in boundaries:
         if u in pos and v in pos:
@@ -1221,19 +1239,9 @@ def plot_network_partition(
                 mid_y,
                 marker="s",
                 color="red",
-                markersize=8,
+                markersize=5,
                 markeredgecolor="black",
                 zorder=5,
-            )
-            ax.text(
-                mid_x,
-                mid_y + offset_y,
-                a["id"],
-                color="darkred",
-                fontsize=8,
-                weight="bold",
-                ha="center",
-                bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
             )
 
     if slack_bus in G.nodes():
@@ -1243,7 +1251,7 @@ def plot_network_partition(
             nodelist=[slack_bus],
             node_shape="*",
             node_color="gold",
-            node_size=200,
+            node_size=60,
             edgecolors="black",
             ax=ax,
         )
@@ -1251,9 +1259,8 @@ def plot_network_partition(
     legend_elements = []
     for idx, area in enumerate(areas_clean):
         color = colors[idx % len(colors)]
-        num_nodes = area.number_of_nodes()
         legend_elements.append(
-            mpatches.Patch(color=color, label=f"Area {idx} ({num_nodes} nodes)")
+            mpatches.Patch(color=color, label=f"Area {idx}")
         )
     legend_elements.append(
         Line2D(
@@ -1263,8 +1270,8 @@ def plot_network_partition(
             color="w",
             markerfacecolor="red",
             markeredgecolor="black",
-            markersize=8,
-            label="Boundary Switch Location",
+            markersize=5,
+            label="Boundary",
         )
     )
     if slack_bus in G.nodes():
@@ -1276,22 +1283,25 @@ def plot_network_partition(
                 color="w",
                 markerfacecolor="gold",
                 markeredgecolor="black",
-                markersize=12,
+                markersize=8,
                 label="Slack Bus",
             )
         )
 
-    ax.legend(
-        handles=legend_elements,
-        bbox_to_anchor=(1.02, 1),
-        loc="upper left",
-        borderaxespad=0.0,
-        framealpha=0.95,
-        facecolor="white",
-        edgecolor="#DDE3EC",
-    )
+    ax.legend(handles=legend_elements, loc="best")
     ax.axis("off")
     return fig
+
+
+def _get_base_voltages(topology: Any, common_cols: list[str]) -> dict[str, float]:
+    """Extract base voltage dictionary for common_cols from the topology."""
+    if not topology or not hasattr(topology, "base_voltage_magnitudes"):
+        return {}
+    try:
+        info = topology.base_voltage_magnitudes
+        return dict(zip(info.ids, info.values))
+    except Exception:
+        return {}
 
 
 def plot_voltage_scatter_at_timestep(
@@ -1335,20 +1345,17 @@ def plot_voltage_scatter_at_timestep(
         logger.warning("No common bus columns found for voltage scatter plot.")
         return None
 
+    base_voltages = _get_base_voltages(topology, common_cols)
+    if not any(col in base_voltages for col in common_cols):
+        logger.error("Voltage scatter failed: Recorded bus columns do not match topology base voltage IDs.")
+        return None
+
     if timestep_val is not None:
         t_val = timestep_val
     else:
         if timestep_idx == -1 or timestep_idx is None:
             max_diff = -1.0
             best_idx = 0
-            try:
-                base_volts_info = topology.base_voltage_magnitudes
-                ids = base_volts_info.ids
-                values = base_volts_info.values
-                base_voltages = dict(zip(ids, values))
-            except Exception:
-                base_voltages = {}
-
             for idx, t in enumerate(common_times):
                 diffs = []
                 for col in common_cols:
@@ -1369,16 +1376,6 @@ def plot_voltage_scatter_at_timestep(
             timestep_idx = best_idx
             logger.info(f"Selected timestep index {timestep_idx} ({common_times[timestep_idx]}) with maximum mean voltage difference of {max_diff:.5f} p.u. for the scatter plot.")
         t_val = common_times[timestep_idx]
-    
-    try:
-        # Load base voltages from topology
-        base_volts_info = topology.base_voltage_magnitudes
-        ids = base_volts_info.ids
-        values = base_volts_info.values
-        base_voltages = dict(zip(ids, values))
-    except Exception as e:
-        logger.warning(f"Could not parse topology for base voltages: {e}")
-        base_voltages = {}
 
     v_ref_list = []
     v_ctrl_list = []
@@ -1423,7 +1420,7 @@ def plot_voltage_scatter_at_timestep(
     ax.set_ylabel("Control Voltage (p.u.)")
 
     ax.grid(True, linestyle=":", zorder=1)
-    ax.legend(loc="lower right")
+    ax.legend(loc="best")
 
     return fig
 
@@ -1514,8 +1511,7 @@ def plot_power_scatter_at_timestep(
     ax1.plot([min_p, max_p], [min_p, max_p], color="#5f6368", linestyle="--", label="y=x")
     ax1.set_xlabel("Reference Injection (kW)")
     ax1.set_ylabel("Control Injection (kW)")
-    ax1.grid(True, linestyle=":")
-    ax1.legend(loc="lower right")
+    ax1.legend(loc="best")
 
     # Reactive Power
     ax2.scatter(q_ref, q_ctrl, color="#f9ab00", edgecolors="none", s=40, label="Buses")
@@ -1525,6 +1521,6 @@ def plot_power_scatter_at_timestep(
     ax2.set_xlabel("Reference Injection (kVar)")
     ax2.set_ylabel("Control Injection (kVar)")
     ax2.grid(True, linestyle=":")
-    ax2.legend(loc="lower right")
-
+    ax2.legend(loc="best")
+    fig.subplots_adjust(wspace=0.35)
     return fig
