@@ -18,8 +18,11 @@ sys.path.insert(0, str(COMPONENT_DIR / "src"))
 try:
     import matplotlib.pyplot as plt
     from oedisi.types.data_types import Topology
-    from admm_federate.adapter import area_disconnects, disconnect_areas, generate_graph
-    from admm_federate.plotting import (
+    from distopf.distributed.spatial.decompose import (
+        build_graph as generate_graph,
+        decompose_graph as area_disconnects,
+    )
+
         configure_publication_style,
         load_scenario_parameters,
         get_der_mapping,

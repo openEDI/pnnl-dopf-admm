@@ -452,7 +452,7 @@ def update_case_from_measurements(
             continue
         bus_id = name_to_id[bus_name]
         mask = case.bus_data["id"] == bus_id
-        if not mask.any():
+        if not np.any(mask):
             continue
         pq = data["pq"]
         case.bus_data.loc[mask, "pl_a"] = max(0.0, pq[0, 0]) / S_BASE
@@ -469,7 +469,7 @@ def update_case_from_measurements(
                 continue
             bus_id = name_to_id[bus_name]
             mask = case.gen_data["id"] == bus_id
-            if not mask.any():
+            if not np.any(mask):
                 continue
             pv = data["pv"]
             total_p_pu = pv[:, 0].sum() / S_BASE

@@ -2,7 +2,7 @@
 
 import logging
 import math
-from typing import Iterator, Optional
+from typing import Any, Iterator, Optional
 
 import pandas as pd
 
@@ -488,12 +488,30 @@ def result_to_controls_pq(
     return controls_real, controls_imag
 
 
+def _clean_float(val: Any) -> float:
+    """Convert value to float, returning 0.0 for None, NaN, or Inf to ensure JSON schema validity."""
+    if val is None:
+        return 0.0
+    try:
+        f_val = float(val)
+        if math.isnan(f_val) or math.isinf(f_val):
+            return 0.0
+        return f_val
+    except (ValueError, TypeError):
+        return 0.0
+
+
 def result_to_solver_stats(
     converged: bool,
     objective_value: Optional[float],
     iterations: int,
     solve_time: float,
     time: int,
+    admm_iteration: int = 0,
+    vup: float = 0.0,
+    sdn: float = 0.0,
+    optimality_gap: float = 0.0,
+    feasibility_gap: float = 0.0,
 ) -> MeasurementArray:
     """Build a MeasurementArray of solver diagnostics.
 
@@ -505,25 +523,30 @@ def result_to_solver_stats(
     solve_time : float
         Wall-clock solve time in seconds.
     time : int
+    admm_iteration : int
+        Current ENAPP / HELICS boundary exchange iteration count.
+    vup : float
+        Boundary voltage mismatch error.
+    sdn : float
+        Boundary power mismatch error.
+    optimality_gap : float
+    feasibility_gap : float
 
     Returns
     -------
     MeasurementArray
     """
-    obj_val = 0.0
-    if objective_value is not None:
-        try:
-            f_val = float(objective_value)
-            if not math.isnan(f_val):
-                obj_val = f_val
-        except (ValueError, TypeError):
-            pass
-
     stats = {
-        "converged": float(converged),
-        "objective_value": obj_val,
-        "iterations": float(iterations),
-        "solve_time": float(solve_time),
+        "converged": 1.0 if converged else 0.0,
+        "objective_value": _clean_float(objective_value),
+        "iterations": _clean_float(iterations),
+        "num_iters": _clean_float(iterations),
+        "solve_time": _clean_float(solve_time),
+        "optimality_gap": _clean_float(optimality_gap),
+        "feasibility_gap": _clean_float(feasibility_gap),
+        "admm_iteration": _clean_float(admm_iteration),
+        "vup": _clean_float(vup),
+        "sdn": _clean_float(sdn),
     }
     return MeasurementArray(
         ids=list(stats.keys()),
@@ -531,3 +554,4 @@ def result_to_solver_stats(
         time=time,
         units="mixed",
     )
+
