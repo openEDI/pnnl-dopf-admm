@@ -1,26 +1,10 @@
 {
-    "directory": "admm_federate",
-    "execute_function": "python -m src.admm_federate.opf_federate",
+    "directory": "distopf_federate",
+    "execute_function": "distopf-federate-sim",
     "static_inputs": [
         {
             "type": "",
             "port_id": "name"
-        },
-        {
-            "type": "",
-            "port_id": "deltat"
-        },
-        {
-            "type": "",
-            "port_id": "max_itr"
-        },
-        {
-            "type": "",
-            "port_id": "control_type"
-        },
-        {
-            "type": "",
-            "port_id": "switches"
         },
         {
             "type": "",
@@ -32,7 +16,15 @@
         },
         {
             "type": "",
-            "port_id": "relaxed"
+            "port_id": "switches"
+        },
+        {
+            "type": "",
+            "port_id": "vup_tol"
+        },
+        {
+            "type": "",
+            "port_id": "sdn_tol"
         },
         {
             "type": "",
@@ -52,11 +44,15 @@
         },
         {
             "type": "",
-            "port_id": "vup_tol"
+            "port_id": "max_itr"
         },
         {
             "type": "",
-            "port_id": "sdn_tol"
+            "port_id": "relaxed"
+        },
+        {
+            "type": "",
+            "port_id": "control_type"
         },
         {
             "type": "",
