@@ -11,7 +11,7 @@ from oedisi.types.common import BrokerConfig, DefaultFileNames, HeathCheck, Serv
 from pydantic import ValidationError
 
 from distopf_federate.federate import run_simulator
-from distopf_federate.schemas import StaticInputs
+from distopf_federate.schemas import DynamicInputs, DynamicOutputs, StaticInputs
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +39,19 @@ async def configure(config: dict):
     try:
         raw_static = config.get("static_inputs", {})
         raw_static["name"] = config.get("name", raw_static.get("name", ""))
-        StaticInputs.model_validate(raw_static)
+        validated_static = StaticInputs.model_validate(raw_static)
 
         links: dict[str, str] = {}
         for link in config.get("links", []):
             links[link["target_port"]] = f"{link['source']}/{link['source_port']}"
 
+        validated_dyn_inputs = DynamicInputs.model_validate(links)
+        validated_dyn_outputs = DynamicOutputs.model_validate(links)
+
         with open(DefaultFileNames.INPUT_MAPPING.value, "w") as fh:
-            json.dump(links, fh)
+            json.dump(links, fh, indent=2)
         with open(DefaultFileNames.STATIC_INPUTS.value, "w") as fh:
-            json.dump(raw_static, fh)
+            json.dump(validated_static.model_dump(), fh, indent=2)
 
         return JSONResponse(
             ServerReply(detail="Successfully updated configuration files.").model_dump(),
@@ -61,6 +64,7 @@ async def configure(config: dict):
         err = traceback.format_exc()
         logger.error("Configuration failed: %s", err)
         raise HTTPException(status_code=500, detail=err)
+
 
 
 @app.post("/run")

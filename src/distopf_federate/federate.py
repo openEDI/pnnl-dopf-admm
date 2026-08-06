@@ -36,7 +36,7 @@ from oedisi.types.data_types import (
 import distopf as opf
 from distopf.distributed.spatial.decompose import decompose
 
-from distopf_federate.schemas import StaticInputs
+from distopf_federate.schemas import ComponentDefinition, StaticInputs
 from distopf_federate.importer import (
     apply_s_up_to_sub_case,
     apply_v_dn_to_sub_case,
@@ -66,6 +66,11 @@ OBJECTIVES: dict[str, Callable] = {
     "cp_obj_target_q_total": opf.cp_obj_target_q_total,
     "cp_obj_none": opf.cp_obj_none,
 }
+
+
+def _safe_publish(pub: object | None, payload: str) -> None:
+    if pub is not None and hasattr(pub, "publish"):
+        pub.publish(payload)
 
 
 @dataclass
@@ -107,8 +112,8 @@ class DistopfFederate:
         self._initialized: bool = False
 
         self.sub = Subscriptions()
-        self.load_static_inputs()
-        self.load_input_mapping()
+        self.comp_def = ComponentDefinition.from_build_files()
+        self.static = self.comp_def.static_inputs
         self.initialize(broker_config)
         self.register_subscription()
         self.register_publication()
@@ -137,52 +142,66 @@ class DistopfFederate:
         )
 
     def register_subscription(self) -> None:
-        self.sub.topology = self.fed.register_subscription(
-            self.inputs["topology"], ""
-        )
-        self.sub.injections = self.fed.register_subscription(
-            self.inputs["injections"], ""
-        )
-        self.sub.voltages_real = self.fed.register_subscription(
-            self.inputs["voltages_real"], ""
-        )
-        self.sub.voltages_imag = self.fed.register_subscription(
-            self.inputs["voltages_imag"], ""
-        )
-        self.sub.sub_v = self.fed.register_subscription(self.inputs["sub_v"], "")
-        self.sub.sub_p = self.fed.register_subscription(self.inputs["sub_p"], "")
-        self.sub.sub_q = self.fed.register_subscription(self.inputs["sub_q"], "")
+        dyn_in = self.comp_def.dynamic_inputs
+        self.sub.topology = self.fed.register_subscription(dyn_in.topology, "")
+        self.sub.injections = self.fed.register_subscription(dyn_in.injections, "")
+        self.sub.voltages_real = self.fed.register_subscription(dyn_in.voltages_real, "")
+        self.sub.voltages_imag = self.fed.register_subscription(dyn_in.voltages_imag, "")
+        self.sub.sub_v = self.fed.register_subscription(dyn_in.sub_v, "")
+        self.sub.sub_p = self.fed.register_subscription(dyn_in.sub_p, "")
+        self.sub.sub_q = self.fed.register_subscription(dyn_in.sub_q, "")
 
     def register_publication(self) -> None:
-        self.pub_c = self.fed.register_publication(
-            "pub_c", h.HELICS_DATA_TYPE_STRING, ""
+        dyn_out = self.comp_def.dynamic_outputs
+        self.pub_c = (
+            self.fed.register_publication(dyn_out.pub_c, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.pub_c
+            else None
         )
-        self.pub_solver_stats = self.fed.register_publication(
-            "solver_stats", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_solver_stats = (
+            self.fed.register_publication(dyn_out.solver_stats, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.solver_stats
+            else None
         )
-        self.pub_controls_real = self.fed.register_publication(
-            "controls_real", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_controls_real = (
+            self.fed.register_publication(dyn_out.controls_real, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.controls_real
+            else None
         )
-        self.pub_controls_imag = self.fed.register_publication(
-            "controls_imag", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_controls_imag = (
+            self.fed.register_publication(dyn_out.controls_imag, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.controls_imag
+            else None
         )
-        self.pub_powers_mag = self.fed.register_publication(
-            "powers_mag", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_powers_mag = (
+            self.fed.register_publication(dyn_out.powers_mag, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.powers_mag
+            else None
         )
-        self.pub_powers_ang = self.fed.register_publication(
-            "powers_ang", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_powers_ang = (
+            self.fed.register_publication(dyn_out.powers_ang, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.powers_ang
+            else None
         )
-        self.pub_voltages_mag = self.fed.register_publication(
-            "voltages_mag", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_voltages_mag = (
+            self.fed.register_publication(dyn_out.voltages_mag, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.voltages_mag
+            else None
         )
-        self.pub_v = self.fed.register_publication(
-            "pub_v", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_v = (
+            self.fed.register_publication(dyn_out.pub_v, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.pub_v
+            else None
         )
-        self.pub_p = self.fed.register_publication(
-            "pub_p", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_p = (
+            self.fed.register_publication(dyn_out.pub_p, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.pub_p
+            else None
         )
-        self.pub_q = self.fed.register_publication(
-            "pub_q", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_q = (
+            self.fed.register_publication(dyn_out.pub_q, h.HELICS_DATA_TYPE_STRING, "")
+            if dyn_out.pub_q
+            else None
         )
 
     def _get_objective_fn(self) -> Optional[Callable]:
@@ -399,17 +418,19 @@ class DistopfFederate:
             iterations=0,
             solve_time=0.0,
             time=t,
+            admm_iteration=int(getattr(self, "itr", 0) or 0),
+            vup=0.0,
         )
-        self.pub_c.publish(json.dumps([]))
-        self.pub_solver_stats.publish(stats.json())
-        self.pub_controls_real.publish(empty_p.json())
-        self.pub_controls_imag.publish(empty_q.json())
-        self.pub_voltages_mag.publish(empty_v.json())
-        self.pub_powers_mag.publish(empty_mag.json())
-        self.pub_powers_ang.publish(empty_ang.json())
-        self.pub_v.publish(empty_v.json())
-        self.pub_p.publish(empty_p.json())
-        self.pub_q.publish(empty_q.json())
+        _safe_publish(self.pub_c, json.dumps([]))
+        _safe_publish(self.pub_solver_stats, stats.json())
+        _safe_publish(self.pub_controls_real, empty_p.json())
+        _safe_publish(self.pub_controls_imag, empty_q.json())
+        _safe_publish(self.pub_voltages_mag, empty_v.json())
+        _safe_publish(self.pub_powers_mag, empty_mag.json())
+        _safe_publish(self.pub_powers_ang, empty_ang.json())
+        _safe_publish(self.pub_v, empty_v.json())
+        _safe_publish(self.pub_p, empty_p.json())
+        _safe_publish(self.pub_q, empty_q.json())
 
     def _publish_results(self, result, t: int) -> None:
         """Publish all output topics from a sub-area PowerFlowResult.
@@ -421,52 +442,42 @@ class DistopfFederate:
         """
         # Inverter setpoint commands
         commands = result_to_commands(result, self.gen_tags or {}, t)
-        self.pub_c.publish(json.dumps(commands))
-
-        # Solver diagnostics
-        stats = result_to_solver_stats(
-            converged=bool(getattr(result, "converged", False)),
-            objective_value=getattr(result, "objective_value", None),
-            iterations=int(getattr(result, "iterations", 0) or 0),
-            solve_time=float(getattr(result, "solve_time", 0.0) or 0.0),
-            time=t,
-        )
-        self.pub_solver_stats.publish(stats.json())
+        _safe_publish(self.pub_c, json.dumps(commands))
 
         # Generator P/Q control setpoints
         ctrl_p, ctrl_q = result_to_controls_pq(result, self.gen_tags or {}, t)
-        self.pub_controls_real.publish(ctrl_p.json())
-        self.pub_controls_imag.publish(ctrl_q.json())
+        _safe_publish(self.pub_controls_real, ctrl_p.json())
+        _safe_publish(self.pub_controls_imag, ctrl_q.json())
 
         # Full-network voltage magnitude (for OEDISI recorders / displays)
         v_mag = result_to_voltage_mag(result, self.v_ln_base_map or {}, t)
-        self.pub_voltages_mag.publish(v_mag.json())
+        _safe_publish(self.pub_voltages_mag, v_mag.json())
 
         # Branch power magnitude and angle
         p_mag = result_to_power_mag(result, self.v_ln_base_map or {}, t)
-        self.pub_powers_mag.publish(p_mag.json())
+        _safe_publish(self.pub_powers_mag, p_mag.json())
 
         p_ang = result_to_power_angle(result, t)
-        self.pub_powers_ang.publish(p_ang.json())
+        _safe_publish(self.pub_powers_ang, p_ang.json())
 
         # ── ENAPP boundary variable publications ──────────────────────────
         # S_up (upstream power injection): parent area reads this to update
         # its dummy PQ node for the next iteration.
         sub_case = self.sub_case if self.sub_case is not None else self.case
         pub_p, pub_q = enapp_s_up_to_pq(sub_case, result, self.area_name or "", t)
-        self.pub_p.publish(pub_p.json())
-        self.pub_q.publish(pub_q.json())
+        _safe_publish(self.pub_p, pub_p.json())
+        _safe_publish(self.pub_q, pub_q.json())
 
         # V_dn (downstream boundary voltages): child areas read this to set
         # their swing-bus voltage for the next iteration.
         pub_v = enapp_v_dn_to_vmag(sub_case, result, self.down_buses, t)
-        self.pub_v.publish(pub_v.json())
+        _safe_publish(self.pub_v, pub_v.json())
 
         # Update convergence tracking: compare S_up values to previous iter.
         curr_vals = pub_p.values + pub_q.values
+        max_dev = 0.0
         if self._prev_s_up_vals:
             if len(curr_vals) == len(self._prev_s_up_vals):
-                import math as _math
                 max_dev = max(
                     abs(c - p) for c, p in zip(curr_vals, self._prev_s_up_vals)
                 )
@@ -477,6 +488,21 @@ class DistopfFederate:
                     )
                     self.converged = True
         self._prev_s_up_vals = list(curr_vals)
+
+        # Solver diagnostics
+        stats = result_to_solver_stats(
+            converged=bool(getattr(result, "converged", False)),
+            objective_value=getattr(result, "objective_value", None),
+            iterations=int(getattr(result, "iterations", 0) or 0),
+            solve_time=float(getattr(result, "solve_time", 0.0) or 0.0),
+            time=t,
+            admm_iteration=int(getattr(self, "itr", 0) or 0),
+            vup=float(max_dev),
+            optimality_gap=float(getattr(result, "optimality_gap", 0.0) or 0.0),
+            feasibility_gap=float(getattr(result, "feasibility_gap", 0.0) or 0.0),
+        )
+        _safe_publish(self.pub_solver_stats, stats.json())
+
 
     def first_pub(self, t: float) -> None:
         """Publish empty initial values at the start of each timestep's iteration loop."""
