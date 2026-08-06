@@ -1,4 +1,10 @@
-"""HELICS federate that uses distopf (ENAPP or single-area) for OPF.
+"""HELICS federate that uses distopf (ENAPP per-area) for OPF.
+
+Each instance of this federate represents ONE spatial decomposition area.
+On each HELICS iteration it performs a single local OPF solve on its own
+sub-network, publishes boundary variables (S_up, V_dn) to the hub
+aggregators, and reads the aggregated boundary data from the hubs to apply
+as boundary conditions for the next iteration.
 
 Run via the installed entry point:
     distopf-federate-sim
@@ -28,16 +34,22 @@ from oedisi.types.data_types import (
 )
 
 import distopf as opf
-from distopf.distributed.spatial.enapp import solve_enapp
+from distopf.distributed.spatial.decompose import decompose
 
-from distopf_federate.importer import topology_to_case, update_case_from_measurements
+from distopf_federate.importer import (
+    apply_s_up_to_sub_case,
+    apply_v_dn_to_sub_case,
+    topology_to_case,
+    update_case_from_measurements,
+)
 from distopf_federate.exporter import (
+    enapp_s_up_to_pq,
+    enapp_v_dn_to_vmag,
     result_to_commands,
+    result_to_controls_pq,
     result_to_power_angle,
     result_to_power_mag,
-    result_to_pub_pqv,
     result_to_solver_stats,
-    result_to_voltage_angle,
     result_to_voltage_mag,
 )
 
@@ -64,15 +76,13 @@ class StaticConfig:
     objective: str = "cp_obj_none"
     tol: float = 1e-4
     max_iterations: int = 50
-    t_steps: int = 1
+    number_of_timesteps: int = 1
 
 
 @dataclass
 class Subscriptions:
     topology: object = None
     injections: object = None
-    powers_real: object = None
-    powers_imag: object = None
     voltages_real: object = None
     voltages_imag: object = None
     sub_v: object = None
@@ -81,22 +91,36 @@ class Subscriptions:
 
 
 class DistopfFederate:
-    """HELICS value federate that runs distopf OPF each timestep."""
+    """HELICS value federate that runs one distopf OPF per HELICS iteration.
+
+    Each instance handles a single spatial decomposition area.  After
+    ``init_area()`` it holds a ``sub_case`` — the local sub-network extracted
+    from the full topology via ``decompose()`` — and exchanges boundary
+    variables (V_dn, S_up) with the hub aggregators on every HELICS iteration.
+    """
 
     def __init__(self, broker_config: BrokerConfig) -> None:
-        self.case = None
-        self.area_info: Optional[dict] = None
+        # Full-network case (built from topology once)
+        self.case: Optional[opf.Case] = None
+        # Per-area decomposed sub-network case (solved each iteration)
+        self.sub_case: Optional[opf.Case] = None
+        # This federate's area name (e.g. "area_152" or "area_150" for root)
+        self.area_name: Optional[str] = None
+        # Resolved source bus name (may differ from static.source if source is switch ID)
+        self.source_bus: Optional[str] = None
+        # Child area names (dummy PQ node names in sub_case)
+        self.down_buses: list = []
+        # Previous iteration boundary S_up values for convergence tracking
+        self._prev_s_up_vals: list = []
         self.name_to_id: Optional[dict] = None
         self.v_ln_base_map: Optional[dict] = None
         self.gen_tags: Optional[dict] = None
-        self.boundary_buses: list = []
         self._initialized: bool = False
 
         self.sub = Subscriptions()
         self.load_static_inputs()
         self.load_input_mapping()
         self.initialize(broker_config)
-        self.load_component_definition()
         self.register_subscription()
         self.register_publication()
 
@@ -112,18 +136,13 @@ class DistopfFederate:
             objective=config.get("objective", "cp_obj_none"),
             tol=float(config.get("tol", 1e-4)),
             max_iterations=int(config.get("max_iterations", 50)),
-            t_steps=int(config.get("number_of_timesteps", 1)),
+            number_of_timesteps=int(config.get("number_of_timesteps", 1)),
         )
 
     def load_input_mapping(self) -> None:
         path = Path(__file__).parent / "input_mapping.json"
         with open(path, "r", encoding="utf-8") as fh:
             self.inputs = json.load(fh)
-
-    def load_component_definition(self) -> None:
-        path = Path(__file__).parent / "component_definition.json"
-        with open(path, "r", encoding="utf-8") as fh:
-            self.component_config = json.load(fh)
 
     def initialize(self, broker_config: BrokerConfig) -> None:
         self.info = h.helicsCreateFederateInfo()
@@ -144,17 +163,11 @@ class DistopfFederate:
         self.sub.injections = self.fed.register_subscription(
             self.inputs["injections"], ""
         )
-        self.sub.powers_real = self.fed.register_subscription(
-            self.inputs["power_real"], ""
-        )
-        self.sub.powers_imag = self.fed.register_subscription(
-            self.inputs["power_imag"], ""
-        )
         self.sub.voltages_real = self.fed.register_subscription(
-            self.inputs["voltage_real"], ""
+            self.inputs["voltages_real"], ""
         )
         self.sub.voltages_imag = self.fed.register_subscription(
-            self.inputs["voltage_imag"], ""
+            self.inputs["voltages_imag"], ""
         )
         self.sub.sub_v = self.fed.register_subscription(self.inputs["sub_v"], "")
         self.sub.sub_p = self.fed.register_subscription(self.inputs["sub_p"], "")
@@ -167,17 +180,20 @@ class DistopfFederate:
         self.pub_solver_stats = self.fed.register_publication(
             "solver_stats", h.HELICS_DATA_TYPE_STRING, ""
         )
-        self.pub_power_mag = self.fed.register_publication(
-            "power_mag", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_controls_real = self.fed.register_publication(
+            "controls_real", h.HELICS_DATA_TYPE_STRING, ""
         )
-        self.pub_power_angle = self.fed.register_publication(
-            "power_angle", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_controls_imag = self.fed.register_publication(
+            "controls_imag", h.HELICS_DATA_TYPE_STRING, ""
         )
-        self.pub_voltage_mag = self.fed.register_publication(
-            "voltage_mag", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_powers_mag = self.fed.register_publication(
+            "powers_mag", h.HELICS_DATA_TYPE_STRING, ""
         )
-        self.pub_voltage_angle = self.fed.register_publication(
-            "voltage_angle", h.HELICS_DATA_TYPE_STRING, ""
+        self.pub_powers_ang = self.fed.register_publication(
+            "powers_ang", h.HELICS_DATA_TYPE_STRING, ""
+        )
+        self.pub_voltages_mag = self.fed.register_publication(
+            "voltages_mag", h.HELICS_DATA_TYPE_STRING, ""
         )
         self.pub_v = self.fed.register_publication(
             "pub_v", h.HELICS_DATA_TYPE_STRING, ""
@@ -193,12 +209,15 @@ class DistopfFederate:
         return OBJECTIVES.get(self.static.objective)
 
     def init_area(self) -> None:
-        """Parse topology subscription, build Case and area_info."""
+        """Parse topology subscription, build full Case, decompose to local sub_case."""
         topology: Topology = Topology.parse_obj(self.sub.topology.json)
+
+        # Resolve the source bus (handles both direct bus names and switch IDs)
+        self.source_bus = self._resolve_source_bus(topology)
 
         case, name_to_id, v_ln_base_map = topology_to_case(
             topology,
-            source_bus=self.static.source,
+            source_bus=self.source_bus,
         )
 
         self.case = case
@@ -208,21 +227,70 @@ class DistopfFederate:
         # Collect equipment tags per bus for command publication
         self.gen_tags = self._collect_gen_tags(topology)
 
-        # Build area_info for ENAPP spatial decomposition
-        if self.static.switches:
-            self._build_area_info(topology)
-        else:
-            self.area_info = None
-            self.boundary_buses = []
+        # Decompose full case to extract this area's local sub_case
+        self._build_sub_case(topology, case)
 
         self._initialized = True
         logger.info(
-            "Area initialized: %d buses, %d branches, %d generators, %d switches",
+            "Area '%s' initialized: source_bus=%s, %d buses, %d branches, "
+            "%d generators, down_buses=%s",
+            self.area_name,
+            self.source_bus,
             len(case.bus_data),
             len(case.branch_data),
             len(case.gen_data) if case.gen_data is not None else 0,
-            len(self.static.switches),
+            self.down_buses,
         )
+
+    def _resolve_source_bus(self, topology: Topology) -> str:
+        """Resolve ``static.source`` to an actual bus name.
+
+        ``static.source`` may be either:
+        - A bus name directly (e.g. ``"150"`` for the root area).
+        - A switch / equipment ID (e.g. ``"sw3"`` for a child area), in which
+          case the downstream bus of that switch is returned.
+
+        The resolution mirrors the approach used by ``admm_federate.opf_federate``
+        which scans the network graph's boundary edges to find the source bus.
+
+        Parameters
+        ----------
+        topology : Topology
+
+        Returns
+        -------
+        str
+            Resolved source bus name.
+        """
+        source = self.static.source
+        incidences = topology.incidences
+
+        # Collect all known bus names from the topology base voltages
+        bus_names: set = set()
+        for id_str in topology.base_voltage_magnitudes.ids:
+            bus_names.add(id_str.split(".", 1)[0])
+
+        if source in bus_names:
+            # Already a bus name — no resolution needed (root area case)
+            return source
+
+        # Treat source as a switch / equipment ID and find its downstream bus
+        for fr_eq, to_eq, eq_id in zip(
+            incidences.from_equipment,
+            incidences.to_equipment,
+            incidences.ids,
+        ):
+            if eq_id == source:
+                to_bus = to_eq.split(".", 1)[0]
+                logger.debug(
+                    "Resolved source '%s' (switch ID) → bus '%s'", source, to_bus
+                )
+                return to_bus
+
+        logger.warning(
+            "Could not resolve source '%s' to a bus name; using it verbatim.", source
+        )
+        return source
 
     def _collect_gen_tags(self, topology: Topology) -> dict:
         """Build bus_name → list[equipment_tag] for PVSystem generators."""
@@ -238,18 +306,31 @@ class DistopfFederate:
                 gen_tags[name].append(eq)
         return gen_tags
 
-    def _build_area_info(self, topology: Topology) -> None:
-        """Construct area_info dict for solve_enapp from switch boundaries.
+    def _build_sub_case(self, topology: Topology, full_case: opf.Case) -> None:
+        """Decompose the full network into per-area sub-cases and store this area's.
 
-        Each switch branch in self.static.switches defines a decomposition
-        boundary.  The downstream bus becomes the SWING of a child area.
-        The main area (containing the slack bus) is named "main".
+        Scans ``static.switches`` in the topology incidences to identify each
+        child area's source bus, then calls ``decompose(full_case, sources)`` to
+        produce properly wired sub-cases (with dummy SWING / dummy PQ boundary
+        nodes).  Stores:
+
+        - ``self.sub_case`` — the local sub-network for this federate.
+        - ``self.area_name`` — identifier for this area (``"area_{source_bus}"``).
+        - ``self.down_buses`` — child area names (dummy PQ node names in sub_case).
+
+        Parameters
+        ----------
+        topology : Topology
+        full_case : distopf.Case
+            The full network case built from the same topology.
         """
-        slack_bus = self.static.source
+        self.area_name = f"area_{self.source_bus}"
         incidences = topology.incidences
 
-        # Map switch_id → (fr_bus, to_bus) from topology incidences
-        switch_areas: dict = {}
+        # Build sources dict: { area_name: source_bus } for this area + children
+        sources: dict = {self.area_name: self.source_bus}
+        child_area_names: list = []
+
         for fr_eq, to_eq, eq_id in zip(
             incidences.from_equipment,
             incidences.to_equipment,
@@ -257,42 +338,47 @@ class DistopfFederate:
         ):
             if eq_id not in self.static.switches:
                 continue
-            fr_bus = fr_eq.split(".", 1)[0]
             to_bus = to_eq.split(".", 1)[0]
-            area_name = f"area_{to_bus}"
-            switch_areas[area_name] = (fr_bus, to_bus)
+            # Skip the switch that represents *this* area's own parent boundary
+            if to_bus == self.source_bus:
+                continue
+            child_name = f"area_{to_bus}"
+            sources[child_name] = to_bus
+            child_area_names.append(child_name)
 
-        if not switch_areas:
-            logger.warning(
-                "Switches %s not found in topology incidences; "
-                "falling back to single-area solve",
-                self.static.switches,
-            )
-            self.area_info = None
-            self.boundary_buses = []
+        self.down_buses = child_area_names
+
+        if len(sources) == 1 and not self.static.switches:
+            # No switches → single area; sub_case IS the full case
+            self.sub_case = full_case
+            logger.debug("No switches — sub_case equals full case for area '%s'", self.area_name)
             return
 
-        area_info: dict = {
-            "main": {
-                "up_areas": [],
-                "down_areas": list(switch_areas.keys()),
-                "up_buses": [slack_bus],
-            }
-        }
-        boundary_buses = []
-        for area_name, (fr_bus, to_bus) in switch_areas.items():
-            area_info[area_name] = {
-                "up_areas": ["main"],
-                "down_areas": [],
-                "up_buses": [to_bus],
-            }
-            boundary_buses.append(to_bus)
+        try:
+            area_cases = decompose(full_case, sources)
+        except Exception:
+            logger.exception(
+                "decompose() failed for area '%s'; falling back to full case", self.area_name
+            )
+            self.sub_case = full_case
+            return
 
-        self.area_info = area_info
-        self.boundary_buses = boundary_buses
-        logger.debug(
-            "ENAPP area_info: %s", {k: v["up_buses"] for k, v in area_info.items()}
-        )
+        if self.area_name not in area_cases:
+            logger.warning(
+                "Area '%s' not found in decompose output (keys: %s); using full case",
+                self.area_name,
+                list(area_cases.keys()),
+            )
+            self.sub_case = full_case
+        else:
+            self.sub_case = area_cases[self.area_name]
+            logger.debug(
+                "Sub-case built for area '%s': %d buses, %d branches",
+                self.area_name,
+                len(self.sub_case.bus_data),
+                len(self.sub_case.branch_data),
+            )
+
 
     def _read_injection(self) -> Optional[Injection]:
         if self.sub.injections.is_updated():
@@ -336,16 +422,23 @@ class DistopfFederate:
         )
         self.pub_c.publish(json.dumps([]))
         self.pub_solver_stats.publish(stats.json())
-        self.pub_voltage_mag.publish(empty_v.json())
-        self.pub_voltage_angle.publish(empty_v.json())
-        self.pub_power_mag.publish(empty_mag.json())
-        self.pub_power_angle.publish(empty_ang.json())
+        self.pub_controls_real.publish(empty_p.json())
+        self.pub_controls_imag.publish(empty_q.json())
+        self.pub_voltages_mag.publish(empty_v.json())
+        self.pub_powers_mag.publish(empty_mag.json())
+        self.pub_powers_ang.publish(empty_ang.json())
         self.pub_v.publish(empty_v.json())
         self.pub_p.publish(empty_p.json())
         self.pub_q.publish(empty_q.json())
 
     def _publish_results(self, result, t: int) -> None:
-        """Publish all output topics from a PowerFlowResult."""
+        """Publish all output topics from a sub-area PowerFlowResult.
+
+        This publishes both the standard OEDISI outputs (voltage magnitudes,
+        branch powers, generator setpoints) and the ENAPP boundary variables
+        (S_up via pub_p/pub_q, V_dn via pub_v) that the hub aggregators
+        forward to neighbouring area federates.
+        """
         # Inverter setpoint commands
         commands = result_to_commands(result, self.gen_tags or {}, t)
         self.pub_c.publish(json.dumps(commands))
@@ -360,102 +453,218 @@ class DistopfFederate:
         )
         self.pub_solver_stats.publish(stats.json())
 
-        # Voltage magnitude
-        v_mag = result_to_voltage_mag(result, self.v_ln_base_map or {}, t)
-        self.pub_voltage_mag.publish(v_mag.json())
+        # Generator P/Q control setpoints
+        ctrl_p, ctrl_q = result_to_controls_pq(result, self.gen_tags or {}, t)
+        self.pub_controls_real.publish(ctrl_p.json())
+        self.pub_controls_imag.publish(ctrl_q.json())
 
-        # Voltage angle
-        v_ang = result_to_voltage_angle(result, t)
-        self.pub_voltage_angle.publish(v_ang.json())
+        # Full-network voltage magnitude (for OEDISI recorders / displays)
+        v_mag = result_to_voltage_mag(result, self.v_ln_base_map or {}, t)
+        self.pub_voltages_mag.publish(v_mag.json())
 
         # Branch power magnitude and angle
         p_mag = result_to_power_mag(result, self.v_ln_base_map or {}, t)
-        self.pub_power_mag.publish(p_mag.json())
+        self.pub_powers_mag.publish(p_mag.json())
 
         p_ang = result_to_power_angle(result, t)
-        self.pub_power_angle.publish(p_ang.json())
+        self.pub_powers_ang.publish(p_ang.json())
 
-        # Boundary bus publications (for inter-federate coordination)
-        pub_p, pub_q, pub_v = result_to_pub_pqv(
-            result,
-            boundary_buses=self.boundary_buses,
-            v_ln_base_map=self.v_ln_base_map or {},
-            time=t,
-        )
-        self.pub_v.publish(pub_v.json())
+        # ── ENAPP boundary variable publications ──────────────────────────
+        # S_up (upstream power injection): parent area reads this to update
+        # its dummy PQ node for the next iteration.
+        sub_case = self.sub_case if self.sub_case is not None else self.case
+        pub_p, pub_q = enapp_s_up_to_pq(sub_case, result, self.area_name or "", t)
         self.pub_p.publish(pub_p.json())
         self.pub_q.publish(pub_q.json())
 
-    def run(self) -> None:
-        h.helicsFederateEnterExecutingMode(self.fed)
-        logger.info("Federate executing: %s", datetime.now())
+        # V_dn (downstream boundary voltages): child areas read this to set
+        # their swing-bus voltage for the next iteration.
+        pub_v = enapp_v_dn_to_vmag(sub_case, result, self.down_buses, t)
+        self.pub_v.publish(pub_v.json())
 
-        update_interval = int(self.static.deltat)
-        total_time = self.static.t_steps * update_interval
-        granted_time = 0
-        objective_fn = self._get_objective_fn()
-
-        while granted_time < total_time:
-            request_time = granted_time + update_interval
-            granted_time = h.helicsFederateRequestTime(self.fed, request_time)
-            t = int(granted_time)
-            logger.info("Granted time: %d", t)
-
-            # ── Initialize on first timestep ──────────────────────────────
-            if not self._initialized:
-                if not self.sub.topology.is_updated():
-                    logger.warning("Topology subscription not yet available at t=%d", t)
-                    self._publish_empty(t)
-                    continue
-                self.init_area()
-
-            # ── Read live measurements ────────────────────────────────────
-            injection = self._read_injection()
-            voltages_mag = self._read_voltages_mag()
-
-            if injection is not None:
-                update_case_from_measurements(
-                    self.case,
-                    injection,
-                    self.name_to_id,
-                    voltages_mag=voltages_mag,
+        # Update convergence tracking: compare S_up values to previous iter.
+        curr_vals = pub_p.values + pub_q.values
+        if self._prev_s_up_vals:
+            if len(curr_vals) == len(self._prev_s_up_vals):
+                import math as _math
+                max_dev = max(
+                    abs(c - p) for c, p in zip(curr_vals, self._prev_s_up_vals)
                 )
-
-            # ── Solve OPF ─────────────────────────────────────────────────
-            tic = _time.perf_counter()
-            result = None
-            try:
-                if self.area_info is not None:
-                    result = solve_enapp(
-                        self.case,
-                        self.area_info,
-                        objective=objective_fn,
-                        tol=self.static.tol,
-                        max_iterations=self.static.max_iterations,
-                        parallel=True,
+                if max_dev <= self.static.tol:
+                    logger.debug(
+                        "Area '%s' boundary converged (dev=%.2e <= tol=%.2e)",
+                        self.area_name, max_dev, self.static.tol,
                     )
-                elif objective_fn is not None:
-                    result = self.case.run_opf(objective_fn)
-                else:
-                    result = self.case.run_pf()
-            except Exception:
-                logger.exception("OPF solve failed at t=%d", t)
+                    self.converged = True
+        self._prev_s_up_vals = list(curr_vals)
 
-            elapsed = _time.perf_counter() - tic
-            if result is not None:
-                logger.info(
-                    "t=%d  converged=%s  obj=%.4g  solve_time=%.2fs",
-                    t,
-                    getattr(result, "converged", "?"),
-                    getattr(result, "objective_value", float("nan")) or float("nan"),
-                    elapsed,
-                )
-                self._publish_results(result, t)
+    def first_pub(self, t: float) -> None:
+        """Publish empty initial values at the start of each timestep's iteration loop."""
+        self._prev_s_up_vals = []
+        self._publish_empty(int(t))
+
+    def itr_pub(self) -> None:
+        """Read subscriptions, apply boundary conditions, solve sub-area OPF, publish.
+
+        Each call represents ONE ENAPP iteration for this area:
+
+        1. Apply V_dn received from the hub (``sub_v``) to the local sub_case
+           swing-bus schedule.
+        2. Apply S_up from child areas received from the hub (``sub_p``,
+           ``sub_q``) to the dummy PQ-node load schedules in sub_case.
+        3. Update sub_case loads/generation from live feeder measurements.
+        4. Solve ``sub_case.run_opf()`` for one iteration.
+        5. Publish S_up (``pub_p``, ``pub_q``) and V_dn (``pub_v``) for the
+           hub to forward to the parent/child areas.
+        """
+        if not self._initialized:
+            if not self.sub.topology.is_updated():
+                logger.warning("Topology not yet available during iteration; publishing empty")
+                self._publish_empty(self._current_t)
+                return
+            self.init_area()
+
+        objective_fn = self._get_objective_fn()
+        sub_case = self.sub_case if self.sub_case is not None else self.case
+
+        # ── Step 1 & 2: Apply boundary conditions from hub ─────────────────
+        if self.sub.sub_v.is_updated() and self.area_name:
+            sub_v_msg = VoltagesMagnitude.parse_obj(self.sub.sub_v.json)
+            if sub_v_msg.values:
+                apply_v_dn_to_sub_case(sub_case, sub_v_msg, self.area_name)
+
+        if self.down_buses and self.sub.sub_p.is_updated() and self.sub.sub_q.is_updated():
+            sub_p_msg = PowersReal.parse_obj(self.sub.sub_p.json)
+            sub_q_msg = PowersImaginary.parse_obj(self.sub.sub_q.json)
+            if sub_p_msg.values or sub_q_msg.values:
+                apply_s_up_to_sub_case(sub_case, sub_p_msg, sub_q_msg, self.down_buses)
+
+        # ── Step 3: Update live measurements ──────────────────────────────
+        injection = self._read_injection()
+        voltages_mag = self._read_voltages_mag()
+
+        if injection is not None:
+            update_case_from_measurements(
+                sub_case,
+                injection,
+                self.name_to_id,
+                voltages_mag=voltages_mag,
+            )
+
+        # ── Step 4: Solve local sub-area OPF ──────────────────────────────
+        tic = _time.perf_counter()
+        result = None
+        try:
+            if objective_fn is not None:
+                result = sub_case.run_opf(objective_fn)
             else:
-                logger.error("No result at t=%d; publishing empty messages", t)
-                self._publish_empty(t)
+                result = sub_case.run_pf()
+        except Exception:
+            logger.exception("OPF solve failed for area '%s' at t=%d", self.area_name, self._current_t)
 
-        self.stop()
+        elapsed = _time.perf_counter() - tic
+        if result is not None:
+            logger.info(
+                "area=%s  t=%d  converged=%s  obj=%.4g  solve_time=%.2fs",
+                self.area_name,
+                self._current_t,
+                getattr(result, "converged", "?"),
+                getattr(result, "objective_value", float("nan")) or float("nan"),
+                elapsed,
+            )
+            # ── Step 5: Publish results and boundary variables ─────────────
+            self._publish_results(result, self._current_t)
+        else:
+            logger.error("No result for area '%s' at t=%d; publishing empty", self.area_name, self._current_t)
+            self._publish_empty(self._current_t)
+
+    def run(self) -> None:
+        try:
+            logger.info("Federate connected: %s", datetime.now())
+            itr_need = h.helics_iteration_request_iterate_if_needed
+            itr_stop = h.helics_iteration_request_no_iteration
+
+            # Hybrid Fallback Initialization Pattern
+            h.helicsFederateEnterInitializingMode(self.fed)
+            try:
+                topo_json = self.sub.topology.json
+                if topo_json:
+                    self.init_area()
+                    logger.info("Configured area in initialization mode.")
+            except Exception as e:
+                logger.debug("Topology not available during initialization mode: %s", e)
+
+            h.helicsFederateEnterExecutingMode(self.fed)
+            logger.info("Federate executing: %s", datetime.now())
+
+            granted_time = 0.0
+            self._current_t = 0
+            logger.debug("Starting time/iteration loop")
+
+            while True:
+                if (
+                    self.static.number_of_timesteps > 0
+                    and granted_time >= self.static.number_of_timesteps
+                ):
+                    logger.info(
+                        "Reached end time %d. Exiting loop.",
+                        self.static.number_of_timesteps,
+                    )
+                    break
+
+                request_time = granted_time + 1.0
+                itr_flag = itr_need
+                self.converged = False
+                self.itr = 0
+                self.first_pub(granted_time)
+
+                while True:
+                    logger.debug("Requesting time %s with flag %s", request_time, itr_flag)
+                    granted_time, itr_status = h.helicsFederateRequestTimeIterative(
+                        self.fed, request_time, itr_flag
+                    )
+                    logger.info("\tgranted time = %s", granted_time)
+                    logger.info("\titr status = %s", itr_status)
+
+                    if granted_time >= h.HELICS_TIME_MAXTIME:
+                        logger.info("HELICS Max Time reached. Exiting loop.")
+                        break
+
+                    if (
+                        granted_time > 0.0
+                        and self.itr == 0
+                        and not self.sub.voltages_real.is_updated()
+                    ):
+                        logger.info("Feeder disconnected. Exiting loop.")
+                        granted_time = h.HELICS_TIME_MAXTIME
+                        break
+
+                    if itr_status == h.helics_iteration_result_error:
+                        logger.error("HELICS iteration request failed with error status.")
+                        break
+
+                    if itr_status == h.helics_iteration_result_next_step:
+                        logger.debug("Advancing to next timestep at itr=%d", self.itr)
+                        break
+
+                    self.itr += 1
+                    self._current_t = int(granted_time)
+                    logger.info("\titr: %d", self.itr)
+                    self.itr_pub()
+
+                    if self.converged:
+                        itr_flag = itr_stop
+                    else:
+                        itr_flag = itr_need
+
+                if (
+                    granted_time >= h.HELICS_TIME_MAXTIME
+                    or itr_status == h.helics_iteration_result_error
+                ):
+                    break
+
+        finally:
+            self.stop()
 
     def stop(self) -> None:
         h.helicsFederateFinalize(self.fed)

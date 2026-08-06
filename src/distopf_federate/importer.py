@@ -9,7 +9,7 @@ import pandas as pd
 
 import distopf as opf
 from distopf.api import Case
-from oedisi.types.data_types import Injection, Topology, VoltagesMagnitude
+from oedisi.types.data_types import Injection, PowersImaginary, PowersReal, Topology, VoltagesMagnitude
 
 from distopf_federate.constants import MIN_GEN_SA_PU, S_BASE
 
@@ -504,3 +504,118 @@ def update_case_from_measurements(
                         case.schedules.loc[:, col] = float(phase_v[ph])
 
     return case
+
+
+# ---------------------------------------------------------------------------
+# ENAPP per-area boundary variable application
+# ---------------------------------------------------------------------------
+
+def apply_v_dn_to_sub_case(
+    sub_case: Case,
+    vmag: VoltagesMagnitude,
+    area_name: str,
+) -> None:
+    """Apply downstream boundary voltage from hub message to sub_case swing-bus schedules.
+
+    The hub broadcasts a combined ``VoltagesMagnitude`` containing all areas'
+    published V_dn data.  This function extracts the entry for ``area_name``
+    and writes the per-unit voltages into ``sub_case.schedules`` so the next
+    ``run_opf`` call uses the correct swing-bus voltage boundary condition.
+
+    IDs in *vmag* are expected as ``"{area_name}.{phase}"`` (phase: a, b, c).
+    Values are treated as per-unit (the encoding counterpart
+    :func:`distopf_federate.exporter.enapp_v_dn_to_vmag` does not convert to
+    physical Volts).
+
+    Parameters
+    ----------
+    sub_case : distopf.Case
+        This federate's local decomposed sub-network case.
+    vmag : VoltagesMagnitude
+        Aggregated boundary voltage message received from the hub.
+    area_name : str
+        This federate's own area name (e.g. ``"area_152"``).
+    """
+    from distopf.distributed.spatial.enapp import add_v_swing_to_schedules
+
+    phase_map: dict = {"a": None, "b": None, "c": None}
+    for id_str, val in zip(vmag.ids, vmag.values):
+        if "." not in id_str:
+            continue
+        name, phase = id_str.rsplit(".", 1)
+        if name == area_name and phase in phase_map:
+            phase_map[phase] = float(val)
+
+    if all(v is None for v in phase_map.values()):
+        return  # no voltage data for this area in the hub message yet
+
+    v_df = pd.DataFrame([{
+        "name": area_name,
+        "t": 0,
+        "a": phase_map.get("a") if phase_map.get("a") is not None else 1.0,
+        "b": phase_map.get("b") if phase_map.get("b") is not None else 1.0,
+        "c": phase_map.get("c") if phase_map.get("c") is not None else 1.0,
+    }])
+
+    sub_case.schedules = add_v_swing_to_schedules(
+        sub_case.schedules, v_df, area_name
+    )
+
+
+def apply_s_up_to_sub_case(
+    sub_case: Case,
+    pub_p: PowersReal,
+    pub_q: PowersImaginary,
+    child_area_names: list,
+) -> None:
+    """Apply upstream power injections from hub message to sub_case dummy PQ-node schedules.
+
+    The hub broadcasts combined ``PowersReal`` / ``PowersImaginary`` messages
+    containing all areas' published S_up data.  For each child area this
+    function extracts the relevant power values and writes them into
+    ``sub_case.schedules`` so the next ``run_opf`` sees the correct P/Q
+    injections at the dummy PQ boundary node.
+
+    IDs in *pub_p* / *pub_q* are ``"{child_area_name}.{phase}"`` (phase: a, b, c).
+    Values are in Watts / VARs; they are converted to per-unit by dividing by
+    ``S_BASE`` before being passed to ``add_s_to_schedules``.
+
+    Parameters
+    ----------
+    sub_case : distopf.Case
+        This federate's local decomposed sub-network case.
+    pub_p : PowersReal
+        Aggregated S_up active-power message received from the hub.
+    pub_q : PowersImaginary
+        Aggregated S_up reactive-power message received from the hub.
+    child_area_names : list[str]
+        Names of this area's downstream child areas (dummy PQ node names in
+        ``sub_case``).
+    """
+    from distopf.distributed.spatial.enapp import add_s_to_schedules
+
+    if not child_area_names:
+        return
+
+    p_dict: dict = dict(zip(pub_p.ids, pub_p.values))
+    q_dict: dict = dict(zip(pub_q.ids, pub_q.values))
+
+    for child_name in child_area_names:
+        s_phases: dict = {}
+        for phase in "abc":
+            pid = f"{child_name}.{phase}"
+            p_w = float(p_dict.get(pid, 0.0))
+            q_var = float(q_dict.get(pid, 0.0))
+            s_phases[phase] = (p_w + 1j * q_var) / S_BASE  # W → per-unit
+
+        s_df = pd.DataFrame([{
+            "name": child_name,
+            "t": 0,
+            "a": s_phases["a"],
+            "b": s_phases["b"],
+            "c": s_phases["c"],
+        }])
+
+        sub_case.schedules = add_s_to_schedules(
+            sub_case.schedules, s_df, child_name
+        )

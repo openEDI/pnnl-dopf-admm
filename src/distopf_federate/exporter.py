@@ -265,6 +265,108 @@ def result_to_pub_pqv(
     return pub_p, pub_q, pub_v
 
 
+# ---------------------------------------------------------------------------
+# ENAPP per-area boundary variable encoding
+# ---------------------------------------------------------------------------
+
+def enapp_s_up_to_pq(
+    sub_case,
+    result,
+    area_name: str,
+    time: int,
+) -> tuple:
+    """Encode ENAPP S_up (upstream power injection) as OEDISI PowersReal/PowersImaginary.
+
+    Calls ``parse_s_up`` on the local sub_case result and re-labels the output
+    using ``area_name`` as the bus identifier.  The parent area can then match
+    each child's contribution by child area name (not by SWING bus name).
+
+    IDs are formatted as ``"{area_name}.{phase}"`` (phase in lowercase: a, b, c).
+    Values are in Watts / VARs (multiplied by S_BASE).
+
+    Parameters
+    ----------
+    sub_case : distopf.Case
+        This federate's local sub-network case.
+    result : PowerFlowResult
+        OPF result from ``sub_case.run_opf()``.
+    area_name : str
+        This federate's own area name (e.g. ``"area_152"``).
+    time : int
+
+    Returns
+    -------
+    (pub_p, pub_q) : (PowersReal, PowersImaginary)
+    """
+    from distopf.distributed.spatial.enapp import parse_s_up
+
+    s_up = parse_s_up(sub_case, result)
+    p_ids, p_vals = [], []
+    q_ids, q_vals = [], []
+
+    if not s_up.empty:
+        row = s_up.iloc[0]
+        for col, _ in PHASE_COLS:
+            val = row.get(col)
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                continue
+            pid = f"{area_name}.{col}"
+            p_ids.append(pid)
+            p_vals.append(float(val.real if hasattr(val, "real") else val) * S_BASE)
+            q_ids.append(pid)
+            q_vals.append(float(val.imag if hasattr(val, "imag") else 0.0) * S_BASE)
+
+    pub_p = PowersReal(ids=p_ids, equipment_ids=p_ids, values=p_vals, time=time)
+    pub_q = PowersImaginary(ids=q_ids, equipment_ids=q_ids, values=q_vals, time=time)
+    return pub_p, pub_q
+
+
+def enapp_v_dn_to_vmag(
+    sub_case,
+    result,
+    down_buses: list,
+    time: int,
+) -> VoltagesMagnitude:
+    """Encode ENAPP V_dn (downstream boundary voltages) as OEDISI VoltagesMagnitude.
+
+    Calls ``parse_v_dn`` on the local sub_case result and encodes the per-unit
+    voltages for each downstream child area.  Values are published as per-unit
+    (not converted to physical Volts) because the child areas apply them
+    directly to their swing-bus schedule via ``add_v_swing_to_schedules``.
+
+    IDs are formatted as ``"{child_area_name}.{phase}"`` (phase: a, b, c).
+
+    Parameters
+    ----------
+    sub_case : distopf.Case
+        This federate's local sub-network case.
+    result : PowerFlowResult
+        OPF result from ``sub_case.run_opf()``.
+    down_buses : list[str]
+        Child area names (dummy PQ node names in sub_case).
+    time : int
+
+    Returns
+    -------
+    VoltagesMagnitude
+    """
+    from distopf.distributed.spatial.enapp import parse_v_dn
+
+    v_dn = parse_v_dn(sub_case, result, down_buses)
+    v_ids, v_vals = [], []
+
+    for _, row in v_dn.iterrows():
+        child_name = str(row.get("name", ""))
+        for col, _ in PHASE_COLS:
+            val = row.get(col)
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                continue
+            v_ids.append(f"{child_name}.{col}")
+            v_vals.append(float(val))
+
+    return VoltagesMagnitude(ids=v_ids, values=v_vals, time=time)
+
+
 def result_to_commands(
     result,
     gen_tags: dict,
@@ -324,6 +426,66 @@ def result_to_commands(
             commands.append((eq_tag, float(p_w), float(q_var)))
 
     return commands
+
+
+def result_to_controls_pq(
+    result,
+    gen_tags: dict,
+    time: int,
+) -> tuple:
+    """Extract OPF generator setpoints as PowersReal and PowersImaginary.
+
+    Parameters
+    ----------
+    result : PowerFlowResult
+    gen_tags : dict[str, list[str]]
+        Bus name → list of equipment tag strings (e.g. ["PVSystem.pv1"]).
+    time : int
+
+    Returns
+    -------
+    (controls_real, controls_imag) : tuple of (PowersReal, PowersImaginary)
+    """
+    p_ids, p_eq_ids, p_vals = [], [], []
+    q_ids, q_eq_ids, q_vals = [], [], []
+
+    p_gen: Optional[pd.DataFrame] = getattr(result, "active_power_generation", None)
+    q_gen: Optional[pd.DataFrame] = getattr(result, "reactive_power_generation", None)
+
+    if p_gen is not None:
+        q_lookup: dict = {}
+        if q_gen is not None:
+            for _, qrow in q_gen.iterrows():
+                q_lookup[str(qrow.get("name", ""))] = qrow
+
+        for _, prow in p_gen.iterrows():
+            bus_name = str(prow.get("name", ""))
+            if bus_name not in gen_tags:
+                continue
+            for eq_tag in gen_tags[bus_name]:
+                for col, ph_num in PHASE_COLS:
+                    p_raw = prow.get(col)
+                    if p_raw is None or (isinstance(p_raw, float) and math.isnan(p_raw)):
+                        continue
+                    p_w = float(p_raw) * S_BASE
+                    ph_id = f"{eq_tag}.{ph_num}"
+                    p_ids.append(ph_id)
+                    p_eq_ids.append(eq_tag)
+                    p_vals.append(p_w)
+
+                    q_w = 0.0
+                    if bus_name in q_lookup:
+                        qrow = q_lookup[bus_name]
+                        q_raw = qrow.get(col)
+                        if q_raw is not None and not (isinstance(q_raw, float) and math.isnan(q_raw)):
+                            q_w = float(q_raw) * S_BASE
+                    q_ids.append(ph_id)
+                    q_eq_ids.append(eq_tag)
+                    q_vals.append(q_w)
+
+    controls_real = PowersReal(ids=p_ids, equipment_ids=p_eq_ids, values=p_vals, time=time)
+    controls_imag = PowersImaginary(ids=q_ids, equipment_ids=q_eq_ids, values=q_vals, time=time)
+    return controls_real, controls_imag
 
 
 def result_to_solver_stats(
