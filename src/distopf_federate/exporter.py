@@ -510,9 +510,18 @@ def result_to_solver_stats(
     -------
     MeasurementArray
     """
+    obj_val = 0.0
+    if objective_value is not None:
+        try:
+            f_val = float(objective_value)
+            if not math.isnan(f_val):
+                obj_val = f_val
+        except (ValueError, TypeError):
+            pass
+
     stats = {
         "converged": float(converged),
-        "objective_value": float(objective_value) if objective_value is not None else float("nan"),
+        "objective_value": obj_val,
         "iterations": float(iterations),
         "solve_time": float(solve_time),
     }

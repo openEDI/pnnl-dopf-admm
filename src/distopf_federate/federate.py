@@ -13,13 +13,13 @@ Run via the installed entry point:
 import json
 import logging
 import time as _time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
 
 import helics as h
-from oedisi.types.common import BrokerConfig
+from oedisi.types.common import BrokerConfig, DefaultFileNames
 from oedisi.types.data_types import (
     Injection,
     MeasurementArray,
@@ -36,6 +36,7 @@ from oedisi.types.data_types import (
 import distopf as opf
 from distopf.distributed.spatial.decompose import decompose
 
+from distopf_federate.schemas import StaticInputs
 from distopf_federate.importer import (
     apply_s_up_to_sub_case,
     apply_v_dn_to_sub_case,
@@ -68,18 +69,6 @@ OBJECTIVES: dict[str, Callable] = {
 
 
 @dataclass
-class StaticConfig:
-    name: str = ""
-    deltat: float = 1.0
-    switches: list = field(default_factory=list)
-    source: str = ""
-    objective: str = "cp_obj_none"
-    tol: float = 1e-4
-    max_iterations: int = 50
-    number_of_timesteps: int = 1
-
-
-@dataclass
 class Subscriptions:
     topology: object = None
     injections: object = None
@@ -106,7 +95,7 @@ class DistopfFederate:
         self.sub_case: Optional[opf.Case] = None
         # This federate's area name (e.g. "area_152" or "area_150" for root)
         self.area_name: Optional[str] = None
-        # Resolved source bus name (may differ from static.source if source is switch ID)
+        # Resolved source bus name (may differ from static.source_bus if source is a switch ID)
         self.source_bus: Optional[str] = None
         # Child area names (dummy PQ node names in sub_case)
         self.down_buses: list = []
@@ -125,22 +114,13 @@ class DistopfFederate:
         self.register_publication()
 
     def load_static_inputs(self) -> None:
-        path = Path(__file__).parent / "static_inputs.json"
+        path = Path(DefaultFileNames.STATIC_INPUTS.value)
         with open(path, "r", encoding="utf-8") as fh:
             config = json.load(fh)
-        self.static = StaticConfig(
-            name=config["name"],
-            deltat=float(config.get("deltat", 1.0)),
-            switches=config.get("switches", []),
-            source=config["source"],
-            objective=config.get("objective", "cp_obj_none"),
-            tol=float(config.get("tol", 1e-4)),
-            max_iterations=int(config.get("max_iterations", 50)),
-            number_of_timesteps=int(config.get("number_of_timesteps", 1)),
-        )
+        self.static = StaticInputs.model_validate(config)
 
     def load_input_mapping(self) -> None:
-        path = Path(__file__).parent / "input_mapping.json"
+        path = Path(DefaultFileNames.INPUT_MAPPING.value)
         with open(path, "r", encoding="utf-8") as fh:
             self.inputs = json.load(fh)
 
@@ -243,9 +223,9 @@ class DistopfFederate:
         )
 
     def _resolve_source_bus(self, topology: Topology) -> str:
-        """Resolve ``static.source`` to an actual bus name.
+        """Resolve ``static.source_bus`` to an actual bus name.
 
-        ``static.source`` may be either:
+        ``static.source_bus`` may be either:
         - A bus name directly (e.g. ``"150"`` for the root area).
         - A switch / equipment ID (e.g. ``"sw3"`` for a child area), in which
           case the downstream bus of that switch is returned.
@@ -262,7 +242,7 @@ class DistopfFederate:
         str
             Resolved source bus name.
         """
-        source = self.static.source
+        source = self.static.source_bus
         incidences = topology.incidences
 
         # Collect all known bus names from the topology base voltages
@@ -490,10 +470,10 @@ class DistopfFederate:
                 max_dev = max(
                     abs(c - p) for c, p in zip(curr_vals, self._prev_s_up_vals)
                 )
-                if max_dev <= self.static.tol:
+                if max_dev <= self.static.vup_tol:
                     logger.debug(
                         "Area '%s' boundary converged (dev=%.2e <= tol=%.2e)",
-                        self.area_name, max_dev, self.static.tol,
+                        self.area_name, max_dev, self.static.vup_tol,
                     )
                     self.converged = True
         self._prev_s_up_vals = list(curr_vals)

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import socket
 import traceback
@@ -6,10 +7,13 @@ import traceback
 import uvicorn
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
-from oedisi.componentframework.system_configuration import ComponentStruct
 from oedisi.types.common import BrokerConfig, DefaultFileNames, HeathCheck, ServerReply
+from pydantic import ValidationError
 
 from distopf_federate.federate import run_simulator
+from distopf_federate.schemas import StaticInputs
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -25,37 +29,50 @@ def read_root():
             host_ip = socket.gethostbyname(socket.gethostname() + ".local")
         except socket.gaierror:
             pass
-    response = HeathCheck(hostname=hostname, host_ip=host_ip).model_dump()
-    return JSONResponse(response, 200)
+    return JSONResponse(
+        HeathCheck(hostname=hostname, host_ip=host_ip).model_dump(), 200
+    )
+
+
+@app.post("/configure")
+async def configure(config: dict):
+    try:
+        raw_static = config.get("static_inputs", {})
+        raw_static["name"] = config.get("name", raw_static.get("name", ""))
+        StaticInputs.model_validate(raw_static)
+
+        links: dict[str, str] = {}
+        for link in config.get("links", []):
+            links[link["target_port"]] = f"{link['source']}/{link['source_port']}"
+
+        with open(DefaultFileNames.INPUT_MAPPING.value, "w") as fh:
+            json.dump(links, fh)
+        with open(DefaultFileNames.STATIC_INPUTS.value, "w") as fh:
+            json.dump(raw_static, fh)
+
+        return JSONResponse(
+            ServerReply(detail="Successfully updated configuration files.").model_dump(),
+            200,
+        )
+    except ValidationError as exc:
+        logger.error("Configuration validation failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Invalid configuration: {exc}")
+    except Exception:
+        err = traceback.format_exc()
+        logger.error("Configuration failed: %s", err)
+        raise HTTPException(status_code=500, detail=err)
 
 
 @app.post("/run")
 async def run_model(broker_config: BrokerConfig, background_tasks: BackgroundTasks):
     try:
         background_tasks.add_task(run_simulator, broker_config)
-        response = ServerReply(detail="Task successfully added.").model_dump()
-        return JSONResponse(response, 200)
+        return JSONResponse(
+            ServerReply(detail="Task successfully added.").model_dump(), 200
+        )
     except Exception:
         err = traceback.format_exc()
         raise HTTPException(500, str(err))
-
-
-@app.post("/configure")
-async def configure(component_struct: ComponentStruct):
-    component = component_struct.component
-    params = component.parameters
-    params["name"] = component.name
-    links = {}
-    for link in component_struct.links:
-        links[link.target_port] = f"{link.source}/{link.source_port}"
-    with open(DefaultFileNames.INPUT_MAPPING.value, "w") as fh:
-        json.dump(links, fh)
-    with open(DefaultFileNames.STATIC_INPUTS.value, "w") as fh:
-        json.dump(params, fh)
-    response = ServerReply(
-        detail="Successfully updated configuration files."
-    ).model_dump()
-    return JSONResponse(response, 200)
 
 
 def main():
