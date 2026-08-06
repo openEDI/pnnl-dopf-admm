@@ -1,28 +1,21 @@
 {
-  "description": "Static configuration parameters defining schema.",
+  "description": "Validated static configuration written by /configure and read by the federate.",
   "properties": {
     "name": {
       "description": "Unique identifier for the federate name",
       "title": "Name",
       "type": "string"
     },
-    "deltat": {
-      "default": 1.0,
-      "description": "Co-simulation time step interval in seconds",
-      "minimum": 0.0,
-      "title": "Time Step (s)",
-      "type": "number"
+    "source_bus": {
+      "default": "",
+      "description": "ID of the boundary/source bus",
+      "title": "Source Bus",
+      "type": "string"
     },
-    "max_itr": {
-      "default": 10,
-      "description": "Maximum number of ADMM iterations per step",
-      "minimum": 1,
-      "title": "Max Itr",
-      "type": "integer"
-    },
-    "control_type": {
-      "description": "Control mode (e.g. 'real', 'reactive')",
-      "title": "Control Type",
+    "source_line": {
+      "default": "",
+      "description": "ID of the boundary/source line",
+      "title": "Source Line",
       "type": "string"
     },
     "switches": {
@@ -33,15 +26,47 @@
       "title": "Switches",
       "type": "array"
     },
-    "source_bus": {
-      "description": "ID of the boundary/source bus",
-      "title": "Source Bus",
-      "type": "string"
+    "vup_tol": {
+      "default": 0.001,
+      "description": "Convergence tolerance for upstream voltage mismatch",
+      "title": "Vup Tol",
+      "type": "number"
     },
-    "source_line": {
-      "description": "ID of the boundary/source line",
-      "title": "Source Line",
-      "type": "string"
+    "sdn_tol": {
+      "default": 0.001,
+      "description": "Convergence tolerance for power mismatch",
+      "title": "Sdn Tol",
+      "type": "number"
+    },
+    "rho_vup": {
+      "default": 1000.0,
+      "description": "ADMM penalty parameter for upstream voltage",
+      "title": "Rho Vup",
+      "type": "number"
+    },
+    "rho_sup": {
+      "default": 0.0,
+      "description": "ADMM penalty parameter for active power injection",
+      "title": "Rho Sup",
+      "type": "number"
+    },
+    "rho_vdn": {
+      "default": 0.0,
+      "description": "ADMM penalty parameter for downstream voltage discrepancy",
+      "title": "Rho Vdn",
+      "type": "number"
+    },
+    "rho_sdn": {
+      "default": 1000.0,
+      "description": "ADMM penalty parameter for active/reactive power flow discrepancy",
+      "title": "Rho Sdn",
+      "type": "number"
+    },
+    "max_itr": {
+      "default": 100,
+      "description": "Maximum number of ADMM iterations per step",
+      "title": "Max Itr",
+      "type": "integer"
     },
     "relaxed": {
       "default": false,
@@ -49,63 +74,34 @@
       "title": "Relaxed",
       "type": "boolean"
     },
-    "rho_sup": {
-      "description": "ADMM penalty parameter for active power injection",
-      "minimum": 0.0,
-      "title": "Rho Sup",
-      "type": "number"
-    },
-    "rho_vup": {
-      "description": "ADMM penalty parameter for upstream voltage",
-      "minimum": 0.0,
-      "title": "Rho Vup",
-      "type": "number"
-    },
-    "rho_sdn": {
-      "description": "ADMM penalty parameter for active/reactive power flow discrepancy",
-      "minimum": 0.0,
-      "title": "Rho Sdn",
-      "type": "number"
-    },
-    "rho_vdn": {
-      "description": "ADMM penalty parameter for downstream voltage discrepancy",
-      "minimum": 0.0,
-      "title": "Rho Vdn",
-      "type": "number"
-    },
-    "vup_tol": {
-      "description": "Convergence tolerance for upstream voltage mismatch",
-      "minimum": 0.0,
-      "title": "Vup Tol",
-      "type": "number"
-    },
-    "sdn_tol": {
-      "description": "Convergence tolerance for power mismatch",
-      "minimum": 0.0,
-      "title": "Sdn Tol",
-      "type": "number"
+    "control_type": {
+      "default": "real",
+      "description": "Control mode (e.g. 'real', 'reactive')",
+      "title": "Control Type",
+      "type": "string"
     },
     "number_of_timesteps": {
-      "default": 0,
-      "description": "Total number of simulation timesteps. When > 0, the federate exits after this many steps.",
-      "minimum": 0,
-      "title": "Number of Timesteps",
+      "default": 1,
+      "description": "Total number of simulation timesteps",
+      "title": "Number Of Timesteps",
       "type": "integer"
+    },
+    "deltat": {
+      "default": 3600.0,
+      "description": "Co-simulation time step interval in seconds",
+      "title": "Deltat",
+      "type": "number"
+    },
+    "objective": {
+      "default": "cp_obj_none",
+      "description": "OPF objective function name",
+      "title": "Objective",
+      "type": "string"
     }
   },
   "required": [
-    "name",
-    "control_type",
-    "switches",
-    "source_bus",
-    "source_line",
-    "rho_sup",
-    "rho_vup",
-    "rho_sdn",
-    "rho_vdn",
-    "vup_tol",
-    "sdn_tol"
+    "name"
   ],
-  "title": "ADMMConfig",
+  "title": "StaticInputs",
   "type": "object"
 }

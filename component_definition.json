@@ -57,6 +57,14 @@
         {
             "type": "",
             "port_id": "number_of_timesteps"
+        },
+        {
+            "type": "",
+            "port_id": "deltat"
+        },
+        {
+            "type": "",
+            "port_id": "objective"
         }
     ],
     "dynamic_inputs": [
