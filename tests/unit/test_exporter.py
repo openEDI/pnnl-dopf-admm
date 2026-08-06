@@ -4,6 +4,7 @@ import math
 import sys
 from pathlib import Path
 from typing import Optional
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -11,6 +12,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from distopf_federate.exporter import (
+    enapp_s_up_to_pq,
+    enapp_v_dn_to_vmag,
     result_to_commands,
     result_to_power_angle,
     result_to_power_mag,
@@ -273,3 +276,90 @@ def test_result_to_solver_stats_has_all_keys():
     stats = result_to_solver_stats(True, 0.5, 5, 0.1, time=0)
     expected = {"converged", "objective_value", "iterations", "solve_time"}
     assert set(stats.ids) == expected
+
+
+# ---------------------------------------------------------------------------
+# ENAPP boundary encoding helpers
+# ---------------------------------------------------------------------------
+
+def _make_s_up_df(name="area_150", p_a=0.5, p_b=0.4, p_c=0.3, q_a=0.1, q_b=0.08, q_c=0.06):
+    """Return a minimal parse_s_up-style DataFrame."""
+    return pd.DataFrame([{
+        "name": name, "t": 0,
+        "a": complex(p_a, q_a),
+        "b": complex(p_b, q_b),
+        "c": complex(p_c, q_c),
+    }])
+
+
+def _make_v_dn_df(area_names=("area_152",), v=1.02):
+    """Return a minimal parse_v_dn-style DataFrame."""
+    rows = [{"name": n, "t": 0, "a": v, "b": v, "c": v} for n in area_names]
+    return pd.DataFrame(rows)
+
+
+class _FakeCase:
+    pass
+
+
+class _FakeResultEnapp:
+    pass
+
+
+@patch("distopf.distributed.spatial.enapp.parse_s_up")
+def test_enapp_s_up_to_pq_encodes_area_name(mock_parse_s_up):
+    """S_up is published with the area's own name as bus ID, not the SWING bus name."""
+    s_up_df = _make_s_up_df(name="area_150", p_a=0.5, q_a=0.1)
+    mock_parse_s_up.return_value = s_up_df
+
+    from distopf_federate.constants import S_BASE
+    pub_p, pub_q = enapp_s_up_to_pq(_FakeCase(), _FakeResultEnapp(), "area_152", time=0)
+
+    # IDs should use the publishing area name, not the SWING bus name "area_150"
+    assert all(id_.startswith("area_152.") for id_ in pub_p.ids), (
+        f"Expected ids to start with 'area_152.', got {pub_p.ids}"
+    )
+    # Values should be in Watts (per-unit × S_BASE)
+    assert any(abs(v) > 0 for v in pub_p.values), "Expected non-zero P values"
+    # P and Q should have matching IDs
+    assert set(pub_p.ids) == set(pub_q.ids)
+
+
+@patch("distopf.distributed.spatial.enapp.parse_s_up")
+def test_enapp_s_up_to_pq_empty_result(mock_parse_s_up):
+    """Empty parse_s_up result produces empty PowersReal/Imaginary."""
+    mock_parse_s_up.return_value = pd.DataFrame(columns=["name", "t", "a", "b", "c"])
+
+    pub_p, pub_q = enapp_s_up_to_pq(_FakeCase(), _FakeResultEnapp(), "area_152", time=5)
+
+    assert pub_p.ids == []
+    assert pub_q.ids == []
+    assert pub_p.values == []
+
+
+@patch("distopf.distributed.spatial.enapp.parse_v_dn")
+def test_enapp_v_dn_to_vmag_encodes_child_names(mock_parse_v_dn):
+    """V_dn is published with child area names as bus IDs."""
+    v_df = _make_v_dn_df(area_names=("area_152", "area_135"), v=1.03)
+    mock_parse_v_dn.return_value = v_df
+
+    vmag = enapp_v_dn_to_vmag(
+        _FakeCase(), _FakeResultEnapp(),
+        down_buses=["area_152", "area_135"],
+        time=0,
+    )
+
+    assert any(id_.startswith("area_152.") for id_ in vmag.ids)
+    assert any(id_.startswith("area_135.") for id_ in vmag.ids)
+    assert all(abs(v - 1.03) < 1e-9 for v in vmag.values)
+
+
+@patch("distopf.distributed.spatial.enapp.parse_v_dn")
+def test_enapp_v_dn_to_vmag_no_down_buses(mock_parse_v_dn):
+    """Empty down_buses returns an empty VoltagesMagnitude."""
+    mock_parse_v_dn.return_value = pd.DataFrame(columns=["name", "t", "a", "b", "c"])
+
+    vmag = enapp_v_dn_to_vmag(_FakeCase(), _FakeResultEnapp(), down_buses=[], time=3)
+
+    assert vmag.ids == []
+    assert vmag.values == []
