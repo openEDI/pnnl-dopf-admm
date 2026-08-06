@@ -9,8 +9,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
+from oedisi.types.data_types import MeasurementArray
 from distopf_federate.exporter import (
     enapp_s_up_to_pq,
     enapp_v_dn_to_vmag,
@@ -269,13 +268,37 @@ def test_result_to_solver_stats_not_converged():
     idx = stats.ids.index("converged")
     assert stats.values[idx] == 0.0
     idx_obj = stats.ids.index("objective_value")
-    assert math.isnan(stats.values[idx_obj])
+    assert stats.values[idx_obj] == 0.0
 
 
 def test_result_to_solver_stats_has_all_keys():
     stats = result_to_solver_stats(True, 0.5, 5, 0.1, time=0)
-    expected = {"converged", "objective_value", "iterations", "solve_time"}
+    expected = {
+        "converged",
+        "objective_value",
+        "iterations",
+        "num_iters",
+        "solve_time",
+        "optimality_gap",
+        "feasibility_gap",
+        "admm_iteration",
+        "vup",
+        "sdn",
+    }
     assert set(stats.ids) == expected
+
+
+def test_result_to_solver_stats_pydantic_roundtrip():
+    stats = result_to_solver_stats(False, None, 50, 2.1, time=1, admm_iteration=3, vup=0.01)
+    json_str = stats.model_dump_json()
+    deserialized = MeasurementArray.model_validate_json(json_str)
+    assert None not in deserialized.values
+    assert deserialized.time.timestamp() == 1
+    assert deserialized.values[deserialized.ids.index("objective_value")] == 0.0
+    assert deserialized.values[deserialized.ids.index("admm_iteration")] == 3.0
+    assert deserialized.values[deserialized.ids.index("vup")] == 0.01
+
+
 
 
 # ---------------------------------------------------------------------------

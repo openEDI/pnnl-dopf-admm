@@ -1,22 +1,27 @@
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-import networkx as nx
+import pytest
+from pydantic import ValidationError
 
-# Import module directly from source tree to avoid heavy package side effects.
+# Import module directly from source tree
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from admm_federate.opf_federate import ComponentParameters, OPFFederate  # noqa: E402
+from distopf_federate.schemas import (
+    ComponentDefinition,
+    DynamicInputs,
+    DynamicOutputs,
+    StaticInputs,
+)
 
 
-def test_load_static_inputs(tmp_path) -> None:
+def test_component_definition_from_build_files(tmp_path) -> None:
     static_inputs = {
         "name": "test_admm",
         "vup_tol": 0.01,
         "sdn_tol": 0.01,
         "max_itr": 10,
-        "deltat": 3600,
+        "deltat": 3600.0,
         "relaxed": False,
         "control_type": "real",
         "switches": ["sw2", "sw3"],
@@ -28,74 +33,78 @@ def test_load_static_inputs(tmp_path) -> None:
         "rho_sdn": 1000.0,
     }
 
-    # We patch open in builtins so that when it looks for static_inputs.json, it reads from our tmp_path
-    mock_file = tmp_path / "static_inputs.json"
-    mock_file.write_text(json.dumps(static_inputs))
+    input_mapping = {
+        "voltages_real": "feeder/voltages_real",
+        "voltages_imag": "feeder/voltages_imag",
+        "topology": "feeder/topology",
+        "injections": "feeder/injections",
+        "sub_p": "hub_power/pub_p",
+        "sub_q": "hub_power/pub_q",
+        "sub_v": "hub_voltage/pub_v",
+        "pub_c": "control_feeder/change_commands",
+        "solver_stats": "recorder/solver_stats",
+    }
 
-    original_open = open
+    static_file = tmp_path / "static_inputs.json"
+    mapping_file = tmp_path / "input_mapping.json"
+    static_file.write_text(json.dumps(static_inputs))
+    mapping_file.write_text(json.dumps(input_mapping))
 
-    def mock_open(file, *args, **kwargs):
-        if "static_inputs.json" in str(file):
-            return original_open(mock_file, *args, **kwargs)
-        return original_open(file, *args, **kwargs)
-
-    with patch("builtins.open", mock_open):
-        with (
-            patch.object(OPFFederate, "initilize"),
-            patch.object(OPFFederate, "load_input_mapping"),
-            patch.object(OPFFederate, "load_component_definition"),
-            patch.object(OPFFederate, "register_subscription"),
-            patch.object(OPFFederate, "register_publication"),
-        ):
-            broker_config = MagicMock()
-            fed = OPFFederate(broker_config)
-
-            # Assertions on loaded parameters
-            assert isinstance(fed.static, ComponentParameters)
-            assert fed.static.name == "test_admm"
-            assert fed.static.source_bus == "150"
-            assert fed.static.source_line == ""
-            assert fed.deltat == 3600
-            assert fed.admm_config.rho_vup == 1000.0
-            assert fed.admm_config.relaxed is False
-
-
-def test_generate_area_info_missing_slack_bus() -> None:
-
-    from admm_federate import adapter
-
-    # Create a simple graph that does not contain slack bus "150"
-    graph = nx.Graph()
-    graph.add_edge("1", "2", id="sw2", tag="SWITCH", name="1_2")
-
-    # Mock topology
-    topology = MagicMock()
-
-    # Call generate_area_info with a slack_bus that is not in the graph
-    # Boundary ids match the edge to prevent early return on boundary check
-    res_branch, res_bus = adapter.generate_area_info(
-        graph, topology, slack_bus="150", boundary=["sw2"]
+    comp_def = ComponentDefinition.from_build_files(
+        static_inputs_path=static_file,
+        input_mapping_path=mapping_file,
     )
 
-    # Should return None, None instead of crashing with NodeNotFound
-    assert res_branch is None
-    assert res_bus is None
+    assert isinstance(comp_def.static_inputs, StaticInputs)
+    assert comp_def.static_inputs.name == "test_admm"
+    assert comp_def.static_inputs.source_bus == "150"
+
+    assert isinstance(comp_def.dynamic_inputs, DynamicInputs)
+    assert comp_def.dynamic_inputs.voltages_real == "feeder/voltages_real"
+    assert comp_def.dynamic_inputs.sub_p == "hub_power/pub_p"
+
+    assert isinstance(comp_def.dynamic_outputs, DynamicOutputs)
+    assert comp_def.dynamic_outputs.pub_c == "control_feeder/change_commands"
+    assert comp_def.dynamic_outputs.solver_stats == "recorder/solver_stats"
+    # Unmapped publication defaults to standard port name "pub_v"
+    assert comp_def.dynamic_outputs.pub_v == "pub_v"
 
 
-def test_schema_and_component_definition() -> None:
-    # 1. Regenerate schema.json from ComponentParameters
+
+def test_missing_required_dynamic_input_raises_validation_error(tmp_path) -> None:
+    static_inputs = {"name": "test_admm"}
+    # Missing required 'topology' and 'injections'
+    incomplete_mapping = {
+        "voltages_real": "feeder/voltages_real",
+        "voltages_imag": "feeder/voltages_imag",
+        "sub_p": "hub_power/pub_p",
+        "sub_q": "hub_power/pub_q",
+        "sub_v": "hub_voltage/pub_v",
+    }
+
+    static_file = tmp_path / "static_inputs.json"
+    mapping_file = tmp_path / "input_mapping.json"
+    static_file.write_text(json.dumps(static_inputs))
+    mapping_file.write_text(json.dumps(incomplete_mapping))
+
+    with pytest.raises(ValidationError) as exc_info:
+        ComponentDefinition.from_build_files(
+            static_inputs_path=static_file,
+            input_mapping_path=mapping_file,
+        )
+    assert "topology" in str(exc_info.value) or "injections" in str(exc_info.value)
+
+
+def test_schema_and_component_definition_sync() -> None:
+    # 1. Generate schema dict from StaticInputs model
+    model_schema = StaticInputs.model_json_schema()
+
+    # Save to schema.json to ensure sync
     schema_path = Path(__file__).resolve().parents[1] / "schema.json"
-    model_schema = ComponentParameters.model_json_schema()
-    schema_content = json.dumps(model_schema, indent=2) + "\n"
     with open(schema_path, "w", encoding="utf-8") as f:
-        f.write(schema_content)
+        f.write(json.dumps(model_schema, indent=2) + "\n")
 
-    # 2. Verify schema.json matches model_schema
-    with open(schema_path, encoding="utf-8") as f:
-        schema_json = json.load(f)
-    assert model_schema == schema_json
-
-    # 3. Load component_definition.json and verify static_inputs match schema properties
+    # 2. Verify component_definition.json static_inputs match StaticInputs schema properties
     comp_def_path = Path(__file__).resolve().parents[1] / "component_definition.json"
     with open(comp_def_path, encoding="utf-8") as f:
         comp_def = json.load(f)
@@ -104,10 +113,21 @@ def test_schema_and_component_definition() -> None:
     static_input_names = {item["port_id"] for item in static_inputs}
     schema_properties = set(model_schema.get("properties", {}).keys())
 
-    missing = schema_properties - static_input_names
-    extra = static_input_names - schema_properties
     assert static_input_names == schema_properties, (
-        "Mismatch between component_definition.json static_inputs and ComponentParameters schema properties.\n"
-        f"Missing in component_definition.json: {missing}\n"
-        f"Extra in component_definition.json: {extra}"
+        "Mismatch between component_definition.json static_inputs and StaticInputs schema properties.\n"
+        f"Missing in component_definition.json: {schema_properties - static_input_names}\n"
+        f"Extra in component_definition.json: {static_input_names - schema_properties}"
     )
+
+    # 3. Verify component_definition.json dynamic_inputs match DynamicInputs fields
+    dynamic_inputs = comp_def.get("dynamic_inputs", [])
+    comp_def_dyn_inputs = {item["port_id"] for item in dynamic_inputs}
+    model_dyn_inputs = set(DynamicInputs.model_fields.keys())
+    assert comp_def_dyn_inputs == model_dyn_inputs
+
+    # 4. Verify component_definition.json dynamic_outputs match DynamicOutputs fields
+    dynamic_outputs = comp_def.get("dynamic_outputs", [])
+    comp_def_dyn_outputs = {item["port_id"] for item in dynamic_outputs}
+    model_dyn_outputs = set(DynamicOutputs.model_fields.keys())
+    assert comp_def_dyn_outputs == model_dyn_outputs
+
