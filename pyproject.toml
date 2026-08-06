@@ -34,8 +34,6 @@ dependencies = [
 ]
 
 [project.scripts]
-admm-federate-server = "admm_federate.server:main"
-admm-federate-sim = "admm_federate.opf_federate:main"
 distopf-federate-server = "distopf_federate.server:main"
 distopf-federate-sim = "distopf_federate.federate:main"
 
