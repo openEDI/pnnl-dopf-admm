@@ -822,6 +822,7 @@ def plot_voltage_comparison(
     voltage_data: dict[int, pd.DataFrame],
     timestep: Any = None,
     figsize: tuple[float, float] | None = None,
+    target: str = "paper",
 ) -> plt.Figure | None:
     """Generate a split violin plot comparing Reference vs Control feeder voltages per area."""
     import seaborn as sns
@@ -857,7 +858,10 @@ def plot_voltage_comparison(
     df_volt = df_volt.sort_values(by="Area")
 
     if figsize is None:
-        figsize = get_publication_figsize("single", "golden")
+        if target == "notebook":
+            figsize = (7.5, 4.0)
+        else:
+            figsize = get_publication_figsize("single", "golden")
 
     fig, ax = plt.subplots(figsize=figsize)
     sns.violinplot(
@@ -893,7 +897,16 @@ def plot_voltage_comparison(
         mpatches.Patch(color="#7f7f7f", label="Control Feeder (Colored by Area)"),
         limit_line,
     ]
-    ax.legend(handles=legend_elements, loc="best")
+    if target == "notebook":
+        ax.legend(
+            handles=legend_elements,
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            borderaxespad=0.0,
+            framealpha=0.95,
+        )
+    else:
+        ax.legend(handles=legend_elements, loc="best")
 
     return fig
 
@@ -902,6 +915,7 @@ def plot_power_flow_comparison(
     flow_data: dict[str, Any],
     timestep: Any = None,
     figsize: tuple[float, float] | None = None,
+    target: str = "paper",
 ) -> plt.Figure | None:
     """Generate a high-quality grouped bar chart comparing ADMM vs Feeder boundary flows."""
     import seaborn as sns
@@ -948,7 +962,10 @@ def plot_power_flow_comparison(
     df_plot = df_plot.sort_values(by="Area")
 
     if figsize is None:
-        figsize = get_publication_figsize("single", "golden")
+        if target == "notebook":
+            figsize = (7.5, 4.0)
+        else:
+            figsize = get_publication_figsize("single", "golden")
 
     fig, ax = plt.subplots(figsize=figsize)
     sns.barplot(
@@ -977,7 +994,16 @@ def plot_power_flow_comparison(
         mpatches.Patch(color="#b0bec5", label="Reference"),
         mpatches.Patch(color="#7f7f7f", label="Control (Colored by Area)"),
     ]
-    ax.legend(handles=legend_elements, loc="best")
+    if target == "notebook":
+        ax.legend(
+            handles=legend_elements,
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            borderaxespad=0.0,
+            framealpha=0.95,
+        )
+    else:
+        ax.legend(handles=legend_elements, loc="best")
     plt.xticks(rotation=0)
     return fig
 
@@ -986,6 +1012,7 @@ def plot_power_flow_comparison(
 def plot_generation_adequacy(
     adequacy_df: pd.DataFrame,
     figsize: tuple[float, float] | None = None,
+    target: str = "paper",
 ) -> plt.Figure | None:
     """Generate a high-quality side-by-side bar chart of Rated Generation vs Rated Load per area."""
     import seaborn as sns
@@ -997,7 +1024,10 @@ def plot_generation_adequacy(
     adequacy_df = adequacy_df.sort_values(by="Area")
 
     if figsize is None:
-        figsize = get_publication_figsize("single", "golden")
+        if target == "notebook":
+            figsize = (7.5, 4.0)
+        else:
+            figsize = get_publication_figsize("single", "golden")
 
     fig, ax = plt.subplots(figsize=figsize)
     sns.barplot(
@@ -1026,13 +1056,23 @@ def plot_generation_adequacy(
         mpatches.Patch(color="#b0bec5", label="Rated Load"),
         mpatches.Patch(color="#7f7f7f", label="Rated Generation (Colored by Area)"),
     ]
-    ax.legend(handles=legend_elements, loc="best")
+    if target == "notebook":
+        ax.legend(
+            handles=legend_elements,
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            borderaxespad=0.0,
+            framealpha=0.95,
+        )
+    else:
+        ax.legend(handles=legend_elements, loc="best")
     return fig
 
 
 def plot_algorithmic_convergence(
     convergence_data: dict[int, pd.DataFrame],
     figsize: tuple[float, float] | None = None,
+    target: str = "paper",
 ) -> plt.Figure | None:
     """Generate a high-quality semi-log plot of ADMM convergence history at each timestep."""
     if not convergence_data:
@@ -1040,7 +1080,10 @@ def plot_algorithmic_convergence(
         return None
 
     if figsize is None:
-        figsize = get_publication_figsize("single", 1.2)
+        if target == "notebook":
+            figsize = (7.5, 4.5)
+        else:
+            figsize = get_publication_figsize("single", 1.2)
 
     records = []
     for aid, df in convergence_data.items():
@@ -1118,7 +1161,17 @@ def plot_algorithmic_convergence(
 
     plt.setp(ax2.get_xticklabels(), rotation=15, ha="right")
 
-    ax1.legend(handles=legend_handles, labels=legend_labels, loc="best")
+    if target == "notebook":
+        ax1.legend(
+            handles=legend_handles,
+            labels=legend_labels,
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            borderaxespad=0.0,
+            framealpha=0.95,
+        )
+    else:
+        ax1.legend(handles=legend_handles, labels=legend_labels, loc="best")
     fig.subplots_adjust(hspace=0.25)
     return fig
 
@@ -1194,10 +1247,14 @@ def plot_network_partition(
     coords_dir: str | Path | None = None,
     scenario_path: str | Path | None = None,
     figsize: tuple[float, float] | None = None,
+    target: str = "paper",
 ) -> plt.Figure:
     """Generate the network partition map showing control areas and boundary switches."""
     if figsize is None:
-        figsize = get_publication_figsize("single", "square")
+        if target == "notebook":
+            figsize = (7.5, 5.5)
+        else:
+            figsize = get_publication_figsize("single", "square")
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -1288,7 +1345,16 @@ def plot_network_partition(
             )
         )
 
-    ax.legend(handles=legend_elements, loc="best")
+    if target == "notebook":
+        ax.legend(
+            handles=legend_elements,
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            borderaxespad=0.0,
+            framealpha=0.95,
+        )
+    else:
+        ax.legend(handles=legend_elements, loc="best")
     ax.axis("off")
     return fig
 
@@ -1310,6 +1376,7 @@ def plot_voltage_scatter_at_timestep(
     timestep_idx: int = -1,
     timestep_val: Any = None,
     figsize: tuple[float, float] | None = None,
+    target: str = "paper",
 ) -> plt.Figure | None:
     """Generate a scatter plot comparing individual bus voltage magnitudes (control vs reference)
     at a single timestep.
@@ -1400,7 +1467,10 @@ def plot_voltage_scatter_at_timestep(
     v_ctrl = np.array(v_ctrl_list)
 
     if figsize is None:
-        figsize = get_publication_figsize("single", "square")
+        if target == "notebook":
+            figsize = (6.5, 5.0)
+        else:
+            figsize = get_publication_figsize("single", "square")
 
     fig, ax = plt.subplots(figsize=figsize)
 
@@ -1420,7 +1490,15 @@ def plot_voltage_scatter_at_timestep(
     ax.set_ylabel("Control Voltage (p.u.)")
 
     ax.grid(True, linestyle=":", zorder=1)
-    ax.legend(loc="best")
+    if target == "notebook":
+        ax.legend(
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            borderaxespad=0.0,
+            framealpha=0.95,
+        )
+    else:
+        ax.legend(loc="best")
 
     return fig
 
@@ -1430,6 +1508,7 @@ def plot_power_scatter_at_timestep(
     timestep_idx: int = -1,
     timestep_val: Any = None,
     figsize: tuple[float, float] | None = None,
+    target: str = "paper",
 ) -> plt.Figure | None:
     """Generate scatter plots comparing individual bus active and reactive power injections
     at a single timestep.
@@ -1500,7 +1579,10 @@ def plot_power_scatter_at_timestep(
     q_ctrl = np.array(q_ctrl_list)
 
     if figsize is None:
-        figsize = get_publication_figsize("double", 0.55)
+        if target == "notebook":
+            figsize = (8.5, 4.0)
+        else:
+            figsize = get_publication_figsize("double", 0.55)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=figsize)
 
@@ -1521,6 +1603,14 @@ def plot_power_scatter_at_timestep(
     ax2.set_xlabel("Reference Injection (kVar)")
     ax2.set_ylabel("Control Injection (kVar)")
     ax2.grid(True, linestyle=":")
-    ax2.legend(loc="best")
+    if target == "notebook":
+        ax2.legend(
+            bbox_to_anchor=(1.02, 1),
+            loc="upper left",
+            borderaxespad=0.0,
+            framealpha=0.95,
+        )
+    else:
+        ax2.legend(loc="best")
     fig.subplots_adjust(wspace=0.35)
     return fig
