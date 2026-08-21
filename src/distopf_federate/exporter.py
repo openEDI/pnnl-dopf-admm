@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pandas as pd
+from distopf.distributed.spatial import enapp
 from oedisi.types.data_types import (
     MeasurementArray,
     PowersAngle,
@@ -269,6 +270,7 @@ def result_to_pub_pqv(
 # ENAPP per-area boundary variable encoding
 # ---------------------------------------------------------------------------
 
+
 def enapp_s_up_to_pq(
     sub_case,
     result,
@@ -298,9 +300,7 @@ def enapp_s_up_to_pq(
     -------
     (pub_p, pub_q) : (PowersReal, PowersImaginary)
     """
-    from distopf.distributed.spatial.enapp import parse_s_up
-
-    s_up = parse_s_up(sub_case, result)
+    s_up = enapp.parse_s_up(sub_case, result)
     p_ids, p_vals = [], []
     q_ids, q_vals = [], []
 
@@ -350,9 +350,7 @@ def enapp_v_dn_to_vmag(
     -------
     VoltagesMagnitude
     """
-    from distopf.distributed.spatial.enapp import parse_v_dn
-
-    v_dn = parse_v_dn(sub_case, result, down_buses)
+    v_dn = enapp.parse_v_dn(sub_case, result, down_buses)
     v_ids, v_vals = [], []
 
     for _, row in v_dn.iterrows():
@@ -405,20 +403,12 @@ def result_to_commands(
         if bus_name not in gen_tags:
             continue
 
-        p_w = (
-            (prow.get("a", 0.0) or 0.0)
-            + (prow.get("b", 0.0) or 0.0)
-            + (prow.get("c", 0.0) or 0.0)
-        ) * S_BASE
+        p_w = ((prow.get("a", 0.0) or 0.0) + (prow.get("b", 0.0) or 0.0) + (prow.get("c", 0.0) or 0.0)) * S_BASE
 
         q_var = 0.0
         if bus_name in q_lookup:
             qrow = q_lookup[bus_name]
-            q_var = (
-                (qrow.get("a", 0.0) or 0.0)
-                + (qrow.get("b", 0.0) or 0.0)
-                + (qrow.get("c", 0.0) or 0.0)
-            ) * S_BASE
+            q_var = ((qrow.get("a", 0.0) or 0.0) + (qrow.get("b", 0.0) or 0.0) + (qrow.get("c", 0.0) or 0.0)) * S_BASE
 
         for eq_tag in gen_tags[bus_name]:
             if abs(p_w) < COMMAND_THRESHOLD_W and abs(q_var) < COMMAND_THRESHOLD_W:
@@ -554,4 +544,3 @@ def result_to_solver_stats(
         time=time,
         units="mixed",
     )
-

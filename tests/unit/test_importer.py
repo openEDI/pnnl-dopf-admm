@@ -1,18 +1,8 @@
 """Unit tests for distopf_federate.importer."""
 
-import sys
-from pathlib import Path
-
+import distopf as opf
 import numpy as np
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-from distopf_federate.importer import (
-    _phases_to_str,
-    topology_to_case,
-    update_case_from_measurements,
-)
 from oedisi.types.data_types import (
     AdmittanceSparse,
     IncidenceList,
@@ -21,6 +11,12 @@ from oedisi.types.data_types import (
     PowersReal,
     Topology,
     VoltagesMagnitude,
+)
+
+from distopf_federate.importer import (
+    _phases_to_str,
+    topology_to_case,
+    update_case_from_measurements,
 )
 
 # ---------------------------------------------------------------------------
@@ -86,12 +82,8 @@ def _make_topology() -> Topology:
     imag_equipment = ["Load.load3", "PVSystem.pv3"]
     imag_values = [-20.0, 0.0]  # kVAR
 
-    power_real = PowersReal(
-        ids=real_ids, equipment_ids=real_equipment, values=real_values, time=0
-    )
-    power_imag = PowersImaginary(
-        ids=imag_ids, equipment_ids=imag_equipment, values=imag_values, time=0
-    )
+    power_real = PowersReal(ids=real_ids, equipment_ids=real_equipment, values=real_values, time=0)
+    power_imag = PowersImaginary(ids=imag_ids, equipment_ids=imag_equipment, values=imag_values, time=0)
     injections = Injection(power_real=power_real, power_imaginary=power_imag)
 
     return Topology(
@@ -138,7 +130,6 @@ def minimal_case():
 
 def test_topology_to_case_returns_correct_types(minimal_case):
     case, name_to_id, v_ln_base_map = minimal_case
-    import distopf as opf
 
     assert isinstance(case, opf.Case)
     assert isinstance(name_to_id, dict)
@@ -160,7 +151,6 @@ def test_topology_to_case_bus_ids_are_unique_integers(minimal_case):
 
 def test_topology_to_case_swing_bus(minimal_case):
     case, _, _ = minimal_case
-    import distopf as opf
 
     swing_rows = case.bus_data[case.bus_data["bus_type"] == opf.SWING_BUS]
     assert len(swing_rows) == 1

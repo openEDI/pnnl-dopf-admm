@@ -63,7 +63,6 @@ class DynamicOutputs(BaseModel):
     pub_c: str | None = Field("pub_c", description="Publication topic for boundary pub_c")
 
 
-
 class ComponentDefinition(BaseModel):
     """Unified component definition containing static inputs, dynamic inputs, and dynamic outputs."""
 
@@ -104,4 +103,3 @@ class ComponentDefinition(BaseModel):
             dynamic_inputs=dynamic_inputs,
             dynamic_outputs=dynamic_outputs,
         )
-

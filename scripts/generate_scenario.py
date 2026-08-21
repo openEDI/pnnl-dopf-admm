@@ -1,3 +1,4 @@
+import argparse
 import copy
 import json
 import os
@@ -14,10 +15,6 @@ from oedisi.componentframework.system_configuration import (
 )
 from oedisi.types.data_types import Topology
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-COMPONENT_DIR = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, os.path.join(COMPONENT_DIR, "src"))
-
 from distopf_federate.plotting import (
     area_disconnects,
     disconnect_areas,
@@ -25,6 +22,10 @@ from distopf_federate.plotting import (
     get_area_source,
     reconnect_area_switches,
 )
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+COMPONENT_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, os.path.join(COMPONENT_DIR, "src"))
 
 ALGO = "pnnl_dopf_admm"
 NAME = ""
@@ -90,11 +91,7 @@ def plot_network(
     coords = load_coordinates(coords_dir)
     if coords:
         coords_upper = {k.upper(): v for k, v in coords.items()}
-        pos = {
-            node: coords_upper[node.upper()]
-            for node in G.nodes()
-            if node.upper() in coords_upper
-        }
+        pos = {node: coords_upper[node.upper()] for node in G.nodes() if node.upper() in coords_upper}
         missing_nodes = [n for n in G.nodes() if n not in pos]
         if missing_nodes:
             if len(pos) > 0:
@@ -170,9 +167,7 @@ def plot_network(
     for idx, area in enumerate(areas_clean):
         color = colors[idx % len(colors)]
         num_nodes = area.number_of_nodes()
-        legend_elements.append(
-            mpatches.Patch(color=color, label=f"Area {idx} ({num_nodes} nodes)")
-        )
+        legend_elements.append(mpatches.Patch(color=color, label=f"Area {idx} ({num_nodes} nodes)"))
     legend_elements.append(
         Line2D(
             [0],
@@ -200,9 +195,7 @@ def plot_network(
         )
 
     plt.legend(handles=legend_elements, loc="best", fontsize=9, framealpha=0.9)
-    model_name = (
-        os.path.basename(output_path).replace(f"{ALGO}_", "").replace(".png", "")
-    )
+    model_name = os.path.basename(output_path).replace(f"{ALGO}_", "").replace(".png", "")
     plt.title(
         f"{model_name.upper()} Distribution Grid ADMM Area Partition",
         fontsize=14,
@@ -245,9 +238,7 @@ def generate_feeder_ieee(OUTPUTS: str, is_control: bool = False) -> Component:
     )
 
 
-def generate_feeder_smartds(
-    MODEL: str, LEVEL: str, OUTPUTS: str, is_control: bool = False
-) -> Component:
+def generate_feeder_smartds(MODEL: str, LEVEL: str, OUTPUTS: str, is_control: bool = False) -> Component:
     smart_ds = True
     base = f"SMART-DS/v1.0/2018/{MODEL}"
     scenario = f"scenarios/solar_{LEVEL}_batteries_none_timeseries"
@@ -279,9 +270,7 @@ def generate_feeder_smartds(
     )
 
 
-def generate_feeder(
-    MODEL: str, LEVEL: str, OUTPUTS: str, is_control: bool = False
-) -> Component:
+def generate_feeder(MODEL: str, LEVEL: str, OUTPUTS: str, is_control: bool = False) -> Component:
     if "ieee" in MODEL.lower():
         return generate_feeder_ieee(OUTPUTS, is_control)
     else:
@@ -312,9 +301,7 @@ def generate_recorder(port: str, src: str, OUTPUTS: str) -> tuple[Component, Lin
         },
     )
 
-    link = Link(
-        source=src, source_port=port, target=component.name, target_port="subscription"
-    )
+    link = Link(source=src, source_port=port, target=component.name, target_port="subscription")
     return (component, link)
 
 
@@ -344,9 +331,7 @@ def generate_sensor(port: str, src: str) -> tuple[Component, Link]:
         },
     )
 
-    link = Link(
-        source=src, source_port=port, target=component.name, target_port="subscription"
-    )
+    link = Link(source=src, source_port=port, target=component.name, target_port="subscription")
     return (component, link)
 
 
@@ -469,24 +454,16 @@ def link_hub_control(system: WiringDiagram, hub: Component, src: int) -> None:
 
 def link_algo(system: WiringDiagram, algo: Component, feeder: Component, outputs: str) -> None:
     port = "voltages_real"
-    system.links.append(
-        Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
-    )
+    system.links.append(Link(source=feeder.name, source_port=port, target=algo.name, target_port=port))
 
     port = "voltages_imag"
-    system.links.append(
-        Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
-    )
+    system.links.append(Link(source=feeder.name, source_port=port, target=algo.name, target_port=port))
 
     port = "injections"
-    system.links.append(
-        Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
-    )
+    system.links.append(Link(source=feeder.name, source_port=port, target=algo.name, target_port=port))
 
     port = "topology"
-    system.links.append(
-        Link(source=feeder.name, source_port=port, target=algo.name, target_port=port)
-    )
+    system.links.append(Link(source=feeder.name, source_port=port, target=algo.name, target_port=port))
 
     port = "solver_stats"
     component, link = generate_recorder(port, algo.name, outputs)
@@ -494,9 +471,7 @@ def link_algo(system: WiringDiagram, algo: Component, feeder: Component, outputs
     system.links.append(link)
 
 
-def generate_for_model(
-    model_dir: str, topology_path: str, SCENARIOS: str, num_areas: int = 5
-) -> None:
+def generate_for_model(model_dir: str, topology_path: str, SCENARIOS: str, num_areas: int = 5) -> None:
     topology = get_topology(topology_path)
     slack_bus, _ = topology.slack_bus[0].split(".", 1)
 
@@ -512,9 +487,7 @@ def generate_for_model(
     areas_clean = disconnect_areas(graph2, boundaries)
     areas = reconnect_area_switches(copy.deepcopy(areas_clean), boundaries)
 
-    system = WiringDiagram(
-        name=f"{ALGO}_{model_dir}_{num_areas}", components=[], links=[]
-    )
+    system = WiringDiagram(name=f"{ALGO}_{model_dir}_{num_areas}", components=[], links=[])
 
     scenario_outputs = f"{OUTPUTS}/{system.name}"
     abs_scenario_outputs = os.path.abspath(os.path.join(COMPONENT_DIR, scenario_outputs))
@@ -705,8 +678,6 @@ def get_topology(path: str) -> Topology:
 
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(description="Generate ADMM scenarios.")
     parser.add_argument(
         "--num-areas",

@@ -29,9 +29,7 @@ def read_root():
             host_ip = socket.gethostbyname(socket.gethostname() + ".local")
         except socket.gaierror:
             pass
-    return JSONResponse(
-        HeathCheck(hostname=hostname, host_ip=host_ip).model_dump(), 200
-    )
+    return JSONResponse(HeathCheck(hostname=hostname, host_ip=host_ip).model_dump(), 200)
 
 
 @app.post("/configure")
@@ -66,14 +64,11 @@ async def configure(config: dict):
         raise HTTPException(status_code=500, detail=err)
 
 
-
 @app.post("/run")
 async def run_model(broker_config: BrokerConfig, background_tasks: BackgroundTasks):
     try:
         background_tasks.add_task(run_simulator, broker_config)
-        return JSONResponse(
-            ServerReply(detail="Task successfully added.").model_dump(), 200
-        )
+        return JSONResponse(ServerReply(detail="Task successfully added.").model_dump(), 200)
     except Exception:
         err = traceback.format_exc()
         raise HTTPException(500, str(err))

@@ -7,6 +7,7 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 from distopf.api import Case
+from distopf.distributed.spatial import enapp
 from oedisi.types.data_types import (
     Injection,
     PowersImaginary,
@@ -145,9 +146,7 @@ def _active_phases_from_y(y_matrix: np.ndarray) -> list:
     """
     phases = [0, 0, 0]
     for ph in range(3):
-        if np.any(np.abs(y_matrix[ph, :]) > 1e-12) or np.any(
-            np.abs(y_matrix[:, ph]) > 1e-12
-        ):
+        if np.any(np.abs(y_matrix[ph, :]) > 1e-12) or np.any(np.abs(y_matrix[:, ph]) > 1e-12):
             phases[ph] = ph + 1
     return phases
 
@@ -496,9 +495,7 @@ def update_case_from_measurements(
             v_base = case.bus_data.loc[swing_mask, "v_ln_base"].iloc[0]
             if v_base > 0:
                 phase_v = {1: None, 2: None, 3: None}
-                for id_str, voltage in zip(
-                    voltages_mag.ids, voltages_mag.values
-                ):
+                for id_str, voltage in zip(voltages_mag.ids, voltages_mag.values):
                     name, ph_str = id_str.split(".", 1)
                     if name == swing_name:
                         phase_v[int(ph_str)] = voltage / v_base
@@ -513,6 +510,7 @@ def update_case_from_measurements(
 # ---------------------------------------------------------------------------
 # ENAPP per-area boundary variable application
 # ---------------------------------------------------------------------------
+
 
 def apply_v_dn_to_sub_case(
     sub_case: Case,
@@ -540,8 +538,6 @@ def apply_v_dn_to_sub_case(
     area_name : str
         This federate's own area name (e.g. ``"area_152"``).
     """
-    from distopf.distributed.spatial.enapp import add_v_swing_to_schedules
-
     phase_map: dict = {"a": None, "b": None, "c": None}
     for id_str, val in zip(vmag.ids, vmag.values):
         if "." not in id_str:
@@ -553,17 +549,19 @@ def apply_v_dn_to_sub_case(
     if all(v is None for v in phase_map.values()):
         return  # no voltage data for this area in the hub message yet
 
-    v_df = pd.DataFrame([{
-        "name": area_name,
-        "t": 0,
-        "a": phase_map.get("a") if phase_map.get("a") is not None else 1.0,
-        "b": phase_map.get("b") if phase_map.get("b") is not None else 1.0,
-        "c": phase_map.get("c") if phase_map.get("c") is not None else 1.0,
-    }])
-
-    sub_case.schedules = add_v_swing_to_schedules(
-        sub_case.schedules, v_df, area_name
+    v_df = pd.DataFrame(
+        [
+            {
+                "name": area_name,
+                "t": 0,
+                "a": phase_map.get("a") if phase_map.get("a") is not None else 1.0,
+                "b": phase_map.get("b") if phase_map.get("b") is not None else 1.0,
+                "c": phase_map.get("c") if phase_map.get("c") is not None else 1.0,
+            }
+        ]
     )
+
+    sub_case.schedules = enapp.add_v_swing_to_schedules(sub_case.schedules, v_df, area_name)
 
 
 def apply_s_up_to_sub_case(
@@ -596,8 +594,6 @@ def apply_s_up_to_sub_case(
         Names of this area's downstream child areas (dummy PQ node names in
         ``sub_case``).
     """
-    from distopf.distributed.spatial.enapp import add_s_to_schedules
-
     if not child_area_names:
         return
 
@@ -612,14 +608,16 @@ def apply_s_up_to_sub_case(
             q_var = float(q_dict.get(pid, 0.0))
             s_phases[phase] = (p_w + 1j * q_var) / S_BASE  # W → per-unit
 
-        s_df = pd.DataFrame([{
-            "name": child_name,
-            "t": 0,
-            "a": s_phases["a"],
-            "b": s_phases["b"],
-            "c": s_phases["c"],
-        }])
-
-        sub_case.schedules = add_s_to_schedules(
-            sub_case.schedules, s_df, child_name
+        s_df = pd.DataFrame(
+            [
+                {
+                    "name": child_name,
+                    "t": 0,
+                    "a": s_phases["a"],
+                    "b": s_phases["b"],
+                    "c": s_phases["c"],
+                }
+            ]
         )
+
+        sub_case.schedules = enapp.add_s_to_schedules(sub_case.schedules, s_df, child_name)

@@ -11,6 +11,32 @@ import sys
 import warnings
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+from oedisi.types.data_types import Topology
+
+from distopf_federate.plotting import (
+    area_disconnects,
+    configure_publication_style,
+    disconnect_areas,
+    generate_graph,
+    get_der_mapping,
+    get_max_diff_timestep,
+    load_recorder_data,
+    load_scenario_parameters,
+    plot_algorithmic_convergence,
+    plot_generation_adequacy,
+    plot_network_partition,
+    plot_power_flow_comparison,
+    plot_power_scatter_at_timestep,
+    plot_voltage_comparison,
+    plot_voltage_scatter_at_timestep,
+    process_convergence,
+    process_generation_adequacy,
+    process_power_flows,
+    process_voltages,
+)
+
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 # Add the component's src directory to sys.path so we can import admm_federate modules
@@ -18,42 +44,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 COMPONENT_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(COMPONENT_DIR / "src"))
 
-try:
-    import matplotlib.pyplot as plt
-    from distopf_federate.plotting import (
-        area_disconnects,
-        configure_publication_style,
-        disconnect_areas,
-        generate_graph,
-        get_der_mapping,
-        get_max_diff_timestep,
-        load_recorder_data,
-        load_scenario_parameters,
-        plot_algorithmic_convergence,
-        plot_generation_adequacy,
-        plot_network_partition,
-        plot_power_flow_comparison,
-        plot_power_scatter_at_timestep,
-        plot_voltage_comparison,
-        plot_voltage_scatter_at_timestep,
-        process_convergence,
-        process_generation_adequacy,
-        process_power_flows,
-        process_voltages,
-    )
-    from oedisi.types.data_types import Topology
-except ImportError as e:
-    print(
-        f"Error importing distopf_federate or oedisi modules: {e}. "
-        "Ensure the script is executed within the project virtual environment.",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
 # Configure logging
-logging.basicConfig(
-    level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.WARNING, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -98,13 +90,12 @@ def main() -> None:
     # Extract model name and configure publication styles
     stem = scenario_path.stem
     if stem.startswith("pnnl_dopf_admm_"):
-        model = stem[len("pnnl_dopf_admm_"):]
+        model = stem.removeprefix("pnnl_dopf_admm_")
     elif stem == "pnnl_dopf_admm":
         model = "default"
     else:
         model = stem
 
-    import seaborn as sns
     sns.set_theme(style="whitegrid")
     configure_publication_style()
 
@@ -191,9 +182,7 @@ def main() -> None:
     # 4. Process metrics and evaluate results
     logger.info("Processing metrics...")
     voltage_data = process_voltages(data, area_ids, area_buses, topology)
-    flow_data = process_power_flows(
-        data, area_ids, area_params, G, area_buses, der_map, slack_bus
-    )
+    flow_data = process_power_flows(data, area_ids, area_params, G, area_buses, der_map, slack_bus)
     adequacy_df = process_generation_adequacy(topology, area_ids, area_buses)
     convergence_data = process_convergence(data, area_ids)
 
@@ -228,20 +217,13 @@ def main() -> None:
         plt.close(fig_conv)
 
     # 5. Save the scatter plots if reference data is available
-    fig_volt_scatter = plot_voltage_scatter_at_timestep(
-        data,
-        topology,
-        timestep_val=comparison_timestep
-    )
+    fig_volt_scatter = plot_voltage_scatter_at_timestep(data, topology, timestep_val=comparison_timestep)
     if fig_volt_scatter:
         fig_volt_scatter.savefig(output_dir / f"admm_{model}_voltage_scatter.png", dpi=300, bbox_inches="tight")
         fig_volt_scatter.savefig(output_dir / f"admm_{model}_voltage_scatter.eps", bbox_inches="tight")
         plt.close(fig_volt_scatter)
 
-    fig_power_scatter = plot_power_scatter_at_timestep(
-        data,
-        timestep_val=comparison_timestep
-    )
+    fig_power_scatter = plot_power_scatter_at_timestep(data, timestep_val=comparison_timestep)
     if fig_power_scatter:
         fig_power_scatter.savefig(output_dir / f"admm_{model}_power_scatter.png", dpi=300, bbox_inches="tight")
         fig_power_scatter.savefig(output_dir / f"admm_{model}_power_scatter.eps", bbox_inches="tight")

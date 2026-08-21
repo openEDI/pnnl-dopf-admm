@@ -5,11 +5,13 @@ import re
 from pathlib import Path
 from typing import Any
 
+import matplotlib as mpl
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from matplotlib.lines import Line2D
 from oedisi.types.data_types import IncidenceList, Topology
 
@@ -39,12 +41,14 @@ def generate_graph(inc: IncidenceList, slack_bus: str) -> nx.Graph:
             return graph.subgraph(c).copy()
     return graph
 
+
 def get_switches(graph: nx.Graph) -> list:
     switches = []
     for u, v, a in graph.edges(data=True):
         if a.get("tag") == "SWITCH":
             switches.append((u, v, a))
     return switches
+
 
 def area_disconnects(graph: nx.Graph, n_max: int = 5) -> list:
     switches = get_switches(graph)
@@ -72,6 +76,7 @@ def area_disconnects(graph: nx.Graph, n_max: int = 5) -> list:
     open_sw = [sw for _, sw in switch_weights[:n_open]]
     return open_sw
 
+
 def disconnect_areas(graph: nx.Graph, switches: list) -> list[nx.Graph]:
     graph.remove_edges_from(switches)
     areas = []
@@ -79,12 +84,14 @@ def disconnect_areas(graph: nx.Graph, switches: list) -> list[nx.Graph]:
         areas.append(graph.subgraph(c).copy())
     return areas
 
+
 def reconnect_area_switches(areas: list[nx.Graph], switches: list) -> list[nx.Graph]:
     for area in areas:
         for u, v, a in switches:
             if area.has_node(u) or area.has_node(v):
                 area.add_edge(u, v, **a)
     return areas
+
 
 def get_area_source(graph: nx.Graph, slack_bus: str, switches: list) -> tuple:
     paths = {}
@@ -122,57 +129,51 @@ def format_time_val(time_val: Any) -> str:
 
 def set_ieee_style() -> None:
     """Apply IEEE publication-quality style settings."""
-    import matplotlib as mpl
-    mpl.rcParams.update({
-        # ---- Figure ----
-        "figure.figsize": (3.5, 2.5),   # Single column width (inches)
-        "figure.dpi": 300,               # High resolution
-        "figure.autolayout": True,       # Auto tight_layout
-        "savefig.dpi": 300,
-        "savefig.bbox": "tight",
-        "savefig.pad_inches": 0.02,
-
-        # ---- Fonts (IEEE uses Times) ----
-        "font.family": "serif",
-        "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
-        "font.size": 8,                  # Base font size
-        "axes.titlesize": 9,
-        "axes.labelsize": 8,
-        "xtick.labelsize": 7,
-        "ytick.labelsize": 7,
-        "legend.fontsize": 7,
-
-        # ---- Math text (matches serif) ----
-        "mathtext.fontset": "stix",      # Times-like math font
-
-        # ---- Lines and markers ----
-        "lines.linewidth": 1.0,
-        "lines.markersize": 3,
-
-        # ---- Axes ----
-        "axes.linewidth": 0.5,
-        "axes.grid": True,
-        "grid.linewidth": 0.4,
-        "grid.alpha": 0.5,
-
-        # ---- Ticks ----
-        "xtick.direction": "in",
-        "ytick.direction": "in",
-        "xtick.major.width": 0.5,
-        "ytick.major.width": 0.5,
-        "xtick.minor.visible": True,
-        "ytick.minor.visible": True,
-
-        # ---- Legend ----
-        "legend.frameon": True,
-        "legend.framealpha": 0.9,
-        "legend.edgecolor": "0.8",
-        "legend.fancybox": False,
-
-        # ---- Vector Font Export Settings ----
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    })
+    mpl.rcParams.update(
+        {
+            # ---- Figure ----
+            "figure.figsize": (3.5, 2.5),  # Single column width (inches)
+            "figure.dpi": 300,  # High resolution
+            "figure.autolayout": True,  # Auto tight_layout
+            "savefig.dpi": 300,
+            "savefig.bbox": "tight",
+            "savefig.pad_inches": 0.02,
+            # ---- Fonts (IEEE uses Times) ----
+            "font.family": "serif",
+            "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
+            "font.size": 8,  # Base font size
+            "axes.titlesize": 9,
+            "axes.labelsize": 8,
+            "xtick.labelsize": 7,
+            "ytick.labelsize": 7,
+            "legend.fontsize": 7,
+            # ---- Math text (matches serif) ----
+            "mathtext.fontset": "stix",  # Times-like math font
+            # ---- Lines and markers ----
+            "lines.linewidth": 1.0,
+            "lines.markersize": 3,
+            # ---- Axes ----
+            "axes.linewidth": 0.5,
+            "axes.grid": True,
+            "grid.linewidth": 0.4,
+            "grid.alpha": 0.5,
+            # ---- Ticks ----
+            "xtick.direction": "in",
+            "ytick.direction": "in",
+            "xtick.major.width": 0.5,
+            "ytick.major.width": 0.5,
+            "xtick.minor.visible": True,
+            "ytick.minor.visible": True,
+            # ---- Legend ----
+            "legend.frameon": True,
+            "legend.framealpha": 0.9,
+            "legend.edgecolor": "0.8",
+            "legend.fancybox": False,
+            # ---- Vector Font Export Settings ----
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+        }
+    )
 
 
 def configure_publication_style(font_family: str = "serif", base_font_size: float = 8.0) -> None:
@@ -185,7 +186,7 @@ def get_publication_figsize(
     aspect_ratio: str | float = "golden",
 ) -> tuple[float, float]:
     """Calculate figure size in inches based on publication columns and aspect ratios.
-    
+
     Args:
         width_type: 'single' (3.5"), 'double' (7.0"), or a custom float width in inches.
         aspect_ratio: 'golden' (0.618), 'square' (1.0), or a custom float ratio (height/width).
@@ -198,7 +199,7 @@ def get_publication_figsize(
         width = float(width_type)
     else:
         raise ValueError(f"Invalid width_type: {width_type}")
-        
+
     if aspect_ratio == "golden":
         ratio = (5**0.5 - 1) / 2
     elif aspect_ratio == "square":
@@ -207,7 +208,7 @@ def get_publication_figsize(
         ratio = float(aspect_ratio)
     else:
         raise ValueError(f"Invalid aspect_ratio: {aspect_ratio}")
-        
+
     return (width, width * ratio)
 
 
@@ -251,9 +252,7 @@ def load_scenario_parameters(
     return area_ids, area_params
 
 
-def get_boundary_branch_name(
-    G: nx.Graph, source_bus: str, source_line: str | None
-) -> str | None:
+def get_boundary_branch_name(G: nx.Graph, source_bus: str, source_line: str | None) -> str | None:
     """Find the branch name (u_v) representing the boundary of the area
     in the full graph.
     """
@@ -308,8 +307,12 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
     # Map component name to its parameters and type
     components = {comp["name"]: comp for comp in scenario_dict.get("components", [])}
     feeder_names = [name for name, comp in components.items() if comp.get("type") in ["Feeder", "LocalFeeder"]]
-    control_feeder_name = next((name for name in feeder_names if "control" in name.lower() or "local" in name.lower()), None)
-    reference_feeder_name = next((name for name in feeder_names if "reference" in name.lower() or "ref" in name.lower()), None)
+    control_feeder_name = next(
+        (name for name in feeder_names if "control" in name.lower() or "local" in name.lower()), None
+    )
+    reference_feeder_name = next(
+        (name for name in feeder_names if "reference" in name.lower() or "ref" in name.lower()), None
+    )
     if not control_feeder_name and feeder_names:
         control_feeder_name = feeder_names[0]
 
@@ -375,9 +378,7 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
                 elif source_port == "powers_imag":
                     key = "feeder_p_imag"
             elif source and (
-                source.startswith("pnnl_dopf_admm_")
-                or source.startswith("area")
-                or source.startswith("stats")
+                source.startswith("pnnl_dopf_admm_") or source.startswith("area") or source.startswith("stats")
             ):
                 m = re.search(r"\d+$", source)
                 if m:
@@ -400,9 +401,7 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
                 data[key] = pd.read_feather(file_path)
                 logger.info(f"Loaded {filename} for {key} with shape {data[key].shape}")
             else:
-                logger.warning(
-                    f"Required recorder file not found: {filename} (expected for {key})"
-                )
+                logger.warning(f"Required recorder file not found: {filename} (expected for {key})")
 
     return data
 
@@ -422,9 +421,7 @@ def process_voltages(
     has_reference = "reference_v_real" in data and "reference_v_imag" in data
 
     if not has_control:
-        logger.error(
-            "Control feeder voltage real/imag data missing. Skipping voltage processing."
-        )
+        logger.error("Control feeder voltage real/imag data missing. Skipping voltage processing.")
         return {}
 
     ctrl_real_df = data["feeder_v_real"].set_index("time")
@@ -487,7 +484,6 @@ def process_voltages(
             voltage_comparisons[aid] = pd.DataFrame(comparison_records)
 
     return voltage_comparisons
-
 
 
 def get_descendants(G: nx.Graph, root: str, node: str) -> set[str]:
@@ -581,7 +577,6 @@ def process_power_flows(
         if boundary_records:
             results["boundary_flows"][aid] = pd.DataFrame(boundary_records)
 
-
     # 2. Highlight DER Injections (Controls)
     for aid in area_ids:
         ctrl_real_key = f"area_{aid}_ctrl_real"
@@ -624,9 +619,7 @@ def process_power_flows(
     return results
 
 
-def get_edge_flow(
-    u: str, v: str, p_mag_df: pd.DataFrame, p_ang_df: pd.DataFrame, t: Any
-) -> float:
+def get_edge_flow(u: str, v: str, p_mag_df: pd.DataFrame, p_ang_df: pd.DataFrame, t: Any) -> float:
     """Calculate the active power flow on edge (u, v) at time t from the area data."""
     flow_sum = 0.0
     for col in p_mag_df.columns:
@@ -694,16 +687,8 @@ def process_self_sufficiency(
         p_ang_key = f"area_{aid}_p_ang"
         has_boundary_data = p_mag_key in data and p_ang_key in data
 
-        p_mag_df = (
-            data.get(p_mag_key, pd.DataFrame()).set_index("time")
-            if has_boundary_data
-            else None
-        )
-        p_ang_df = (
-            data.get(p_ang_key, pd.DataFrame()).set_index("time")
-            if has_boundary_data
-            else None
-        )
+        p_mag_df = data.get(p_mag_key, pd.DataFrame()).set_index("time") if has_boundary_data else None
+        p_ang_df = data.get(p_ang_key, pd.DataFrame()).set_index("time") if has_boundary_data else None
 
         for t in ctrl_real_df.index:
             # 1. Total Generation = sum of DER active power controls
@@ -717,11 +702,7 @@ def process_self_sufficiency(
             p_net_inj = 0.0
             if "feeder_p_real" in data:
                 feeder_p = data["feeder_p_real"].set_index("time")
-                cols = [
-                    c
-                    for c in feeder_p.columns
-                    if c != "time" and c.split(".")[0] in buses_in_area_set
-                ]
+                cols = [c for c in feeder_p.columns if c != "time" and c.split(".")[0] in buses_in_area_set]
                 if t in feeder_p.index:
                     p_net_inj = float(feeder_p.loc[t, cols].sum())
 
@@ -793,9 +774,7 @@ def process_generation_adequacy(
 
     # Iterate over injections in topology
     real_inj = topology.injections.power_real
-    for bus_phase, eq_id, val in zip(
-        real_inj.ids, real_inj.equipment_ids, real_inj.values
-    ):
+    for bus_phase, eq_id, val in zip(real_inj.ids, real_inj.equipment_ids, real_inj.values):
         bus = bus_phase.split(".")[0]
         aid = bus_area_map.get(bus)
         if aid is None:
@@ -877,11 +856,11 @@ def get_max_diff_timestep(data: dict[str, pd.DataFrame], topology: Topology) -> 
         for col in common_cols:
             v_r_ref = r_r_df.loc[t, col]
             v_i_ref = r_i_df.loc[t, col]
-            v_ref_mag = (v_r_ref**2 + v_i_ref**2)**0.5
+            v_ref_mag = (v_r_ref**2 + v_i_ref**2) ** 0.5
 
             v_r_ctrl = c_r_df.loc[t, col]
             v_i_ctrl = c_i_df.loc[t, col]
-            v_ctrl_mag = (v_r_ctrl**2 + v_i_ctrl**2)**0.5
+            v_ctrl_mag = (v_r_ctrl**2 + v_i_ctrl**2) ** 0.5
 
             base_v = base_voltages.get(col, 1.0)
             if base_v <= 0:
@@ -903,8 +882,6 @@ def plot_voltage_comparison(
     target: str = "paper",
 ) -> plt.Figure | None:
     """Generate a split violin plot comparing Reference vs Control feeder voltages per area."""
-    import seaborn as sns
-
     records = []
     for aid, df in voltage_data.items():
         if df.empty:
@@ -917,9 +894,7 @@ def plot_voltage_comparison(
 
         for _, row in df_latest.iterrows():
             if row.get("v_reference") is not None:
-                records.append(
-                    {"Voltage (p.u.)": row["v_reference"], "Area": f"Area {aid}", "Case": "Reference"}
-                )
+                records.append({"Voltage (p.u.)": row["v_reference"], "Area": f"Area {aid}", "Case": "Reference"})
             records.append(
                 {
                     "Voltage (p.u.)": row["v_control"],
@@ -961,9 +936,7 @@ def plot_voltage_comparison(
             area_idx = idx // 2
             coll.set_facecolor(AREA_COLORS[area_idx % len(AREA_COLORS)])
 
-    limit_line = ax.axhline(
-        1.05, color="r", linestyle="--", label="Voltage Limits"
-    )
+    limit_line = ax.axhline(1.05, color="r", linestyle="--", label="Voltage Limits")
     ax.axhline(0.95, color="r", linestyle="--")
 
     ax.set_xlabel("Control Area")
@@ -996,8 +969,6 @@ def plot_power_flow_comparison(
     target: str = "paper",
 ) -> plt.Figure | None:
     """Generate a high-quality grouped bar chart comparing ADMM vs Feeder boundary flows."""
-    import seaborn as sns
-
     boundary_flows = flow_data["boundary_flows"]
     if not boundary_flows:
         logger.warning("No boundary flow data to plot.")
@@ -1086,15 +1057,12 @@ def plot_power_flow_comparison(
     return fig
 
 
-
 def plot_generation_adequacy(
     adequacy_df: pd.DataFrame,
     figsize: tuple[float, float] | None = None,
     target: str = "paper",
 ) -> plt.Figure | None:
     """Generate a high-quality side-by-side bar chart of Rated Generation vs Rated Load per area."""
-    import seaborn as sns
-
     if adequacy_df.empty:
         return None
 
@@ -1190,7 +1158,7 @@ def plot_algorithmic_convergence(
     colors = AREA_COLORS
 
     areas = sorted(df_plot["Area"].unique(), key=lambda x: int(x.split()[-1]))
-    
+
     legend_handles = []
     legend_labels = []
 
@@ -1201,7 +1169,7 @@ def plot_algorithmic_convergence(
         except (ValueError, IndexError):
             aid = 0
         color = colors[aid % len(colors)]
-        
+
         # Plot Optimality Gap (Top)
         line_opt = ax1.semilogy(
             df_area["time"],
@@ -1210,7 +1178,7 @@ def plot_algorithmic_convergence(
             color=color,
             linewidth=1.0,
         )
-        
+
         # Plot Feasibility Gap (Bottom)
         ax2.semilogy(
             df_area["time"],
@@ -1219,14 +1187,14 @@ def plot_algorithmic_convergence(
             color=color,
             linewidth=1.0,
         )
-        
+
         legend_handles.append(line_opt[0])
         legend_labels.append(f"Area {aid}")
 
     # Tolerance lines
     tol_line = ax1.axhline(1e-3, color="gray", linestyle=":")
     ax2.axhline(1e-3, color="gray", linestyle=":")
-    
+
     legend_handles.append(tol_line)
     legend_labels.append("Tolerance")
 
@@ -1339,11 +1307,7 @@ def plot_network_partition(
     coords = load_coordinates(coords_dir, scenario_path=scenario_path)
     if coords:
         coords_upper = {k.upper(): v for k, v in coords.items()}
-        pos = {
-            node: coords_upper[node.upper()]
-            for node in G.nodes()
-            if node.upper() in coords_upper
-        }
+        pos = {node: coords_upper[node.upper()] for node in G.nodes() if node.upper() in coords_upper}
         missing_nodes = [n for n in G.nodes() if n not in pos]
         if missing_nodes:
             if len(pos) > 0:
@@ -1394,9 +1358,7 @@ def plot_network_partition(
     legend_elements = []
     for idx, area in enumerate(areas_clean):
         color = colors[idx % len(colors)]
-        legend_elements.append(
-            mpatches.Patch(color=color, label=f"Area {idx}")
-        )
+        legend_elements.append(mpatches.Patch(color=color, label=f"Area {idx}"))
     legend_elements.append(
         Line2D(
             [0],
@@ -1469,12 +1431,12 @@ def plot_voltage_scatter_at_timestep(
     r_imag = data["reference_v_imag"]
 
     time_col = "time" if "time" in c_real.columns else c_real.columns[0]
-    
+
     # Align by common times
     c_times = c_real[time_col].unique()
     r_times = r_real[time_col].unique()
     common_times = np.intersect1d(c_times, r_times)
-    
+
     if len(common_times) == 0:
         logger.warning("No common timestamps found for voltage scatter plot.")
         return None
@@ -1506,10 +1468,10 @@ def plot_voltage_scatter_at_timestep(
                 for col in common_cols:
                     v_r_ref = r_r_df.loc[t, col]
                     v_i_ref = r_i_df.loc[t, col]
-                    v_ref_mag = (v_r_ref**2 + v_i_ref**2)**0.5
+                    v_ref_mag = (v_r_ref**2 + v_i_ref**2) ** 0.5
                     v_r_ctrl = c_r_df.loc[t, col]
                     v_i_ctrl = c_i_df.loc[t, col]
-                    v_ctrl_mag = (v_r_ctrl**2 + v_i_ctrl**2)**0.5
+                    v_ctrl_mag = (v_r_ctrl**2 + v_i_ctrl**2) ** 0.5
                     base_v = base_voltages.get(col, 1.0)
                     if base_v <= 0:
                         base_v = 1.0
@@ -1519,7 +1481,9 @@ def plot_voltage_scatter_at_timestep(
                     max_diff = mean_diff
                     best_idx = idx
             timestep_idx = best_idx
-            logger.info(f"Selected timestep index {timestep_idx} ({common_times[timestep_idx]}) with maximum mean voltage difference of {max_diff:.5f} p.u. for the scatter plot.")
+            logger.info(
+                f"Selected timestep index {timestep_idx} ({common_times[timestep_idx]}) with maximum mean voltage difference of {max_diff:.5f} p.u. for the scatter plot."
+            )
         t_val = common_times[timestep_idx]
 
     v_ref_list = []
@@ -1528,11 +1492,11 @@ def plot_voltage_scatter_at_timestep(
     for col in common_cols:
         v_r_ref = r_r_df.loc[t_val, col]
         v_i_ref = r_i_df.loc[t_val, col]
-        v_ref_mag = (v_r_ref**2 + v_i_ref**2)**0.5
+        v_ref_mag = (v_r_ref**2 + v_i_ref**2) ** 0.5
 
         v_r_ctrl = c_r_df.loc[t_val, col]
         v_i_ctrl = c_i_df.loc[t_val, col]
-        v_ctrl_mag = (v_r_ctrl**2 + v_i_ctrl**2)**0.5
+        v_ctrl_mag = (v_r_ctrl**2 + v_i_ctrl**2) ** 0.5
 
         base_v = base_voltages.get(col, 1.0)
         if base_v <= 0:
@@ -1601,11 +1565,11 @@ def plot_power_scatter_at_timestep(
     r_q = data["reference_p_imag"]
 
     time_col = "time" if "time" in c_p.columns else c_p.columns[0]
-    
+
     c_times = c_p[time_col].unique()
     r_times = r_p[time_col].unique()
     common_times = np.intersect1d(c_times, r_times)
-    
+
     if len(common_times) == 0:
         logger.warning("No common timestamps found for power scatter plot.")
         return None
@@ -1637,7 +1601,9 @@ def plot_power_scatter_at_timestep(
                     max_diff = mean_diff
                     best_idx = idx
             timestep_idx = best_idx
-            logger.info(f"Selected timestep index {timestep_idx} ({common_times[timestep_idx]}) with maximum mean power injection difference of {max_diff:.3f} kW for the scatter plot.")
+            logger.info(
+                f"Selected timestep index {timestep_idx} ({common_times[timestep_idx]}) with maximum mean power injection difference of {max_diff:.3f} kW for the scatter plot."
+            )
         t_val = common_times[timestep_idx]
 
     p_ref_list = []

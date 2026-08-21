@@ -1,12 +1,8 @@
 import json
-import sys
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-
-# Import module directly from source tree
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from distopf_federate.schemas import (
     ComponentDefinition,
@@ -71,7 +67,6 @@ def test_component_definition_from_build_files(tmp_path) -> None:
     assert comp_def.dynamic_outputs.pub_v == "pub_v"
 
 
-
 def test_missing_required_dynamic_input_raises_validation_error(tmp_path) -> None:
     static_inputs = {"name": "test_admm"}
     # Missing required 'topology' and 'injections'
@@ -131,4 +126,3 @@ def test_schema_and_component_definition_sync() -> None:
     comp_def_dyn_outputs = {item["port_id"] for item in dynamic_outputs}
     model_dyn_outputs = set(DynamicOutputs.model_fields.keys())
     assert comp_def_dyn_outputs == model_dyn_outputs
-

@@ -5,4 +5,3 @@ COPY . /app
 RUN pip install .
 EXPOSE 5903/tcp
 CMD ["distopf-federate-server"]
-

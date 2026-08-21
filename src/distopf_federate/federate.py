@@ -135,9 +135,7 @@ class DistopfFederate:
         h.helicsFederateInfoSetBroker(self.info, broker_config.broker_ip)
         h.helicsFederateInfoSetBrokerPort(self.info, broker_config.broker_port)
         self.fed = h.helicsCreateValueFederate(self.static.name, self.info)
-        h.helicsFederateSetTimeProperty(
-            self.fed, h.HELICS_PROPERTY_TIME_PERIOD, int(self.static.deltat)
-        )
+        h.helicsFederateSetTimeProperty(self.fed, h.HELICS_PROPERTY_TIME_PERIOD, int(self.static.deltat))
 
     def register_subscription(self) -> None:
         dyn_in = self.comp_def.dynamic_inputs
@@ -152,9 +150,7 @@ class DistopfFederate:
     def register_publication(self) -> None:
         dyn_out = self.comp_def.dynamic_outputs
         self.pub_c = (
-            self.fed.register_publication(dyn_out.pub_c, h.HELICS_DATA_TYPE_STRING, "")
-            if dyn_out.pub_c
-            else None
+            self.fed.register_publication(dyn_out.pub_c, h.HELICS_DATA_TYPE_STRING, "") if dyn_out.pub_c else None
         )
         self.pub_solver_stats = (
             self.fed.register_publication(dyn_out.solver_stats, h.HELICS_DATA_TYPE_STRING, "")
@@ -187,19 +183,13 @@ class DistopfFederate:
             else None
         )
         self.pub_v = (
-            self.fed.register_publication(dyn_out.pub_v, h.HELICS_DATA_TYPE_STRING, "")
-            if dyn_out.pub_v
-            else None
+            self.fed.register_publication(dyn_out.pub_v, h.HELICS_DATA_TYPE_STRING, "") if dyn_out.pub_v else None
         )
         self.pub_p = (
-            self.fed.register_publication(dyn_out.pub_p, h.HELICS_DATA_TYPE_STRING, "")
-            if dyn_out.pub_p
-            else None
+            self.fed.register_publication(dyn_out.pub_p, h.HELICS_DATA_TYPE_STRING, "") if dyn_out.pub_p else None
         )
         self.pub_q = (
-            self.fed.register_publication(dyn_out.pub_q, h.HELICS_DATA_TYPE_STRING, "")
-            if dyn_out.pub_q
-            else None
+            self.fed.register_publication(dyn_out.pub_q, h.HELICS_DATA_TYPE_STRING, "") if dyn_out.pub_q else None
         )
 
     def _get_objective_fn(self) -> Callable | None:
@@ -229,8 +219,7 @@ class DistopfFederate:
 
         self._initialized = True
         logger.info(
-            "Area '%s' initialized: source_bus=%s, %d buses, %d branches, "
-            "%d generators, down_buses=%s",
+            "Area '%s' initialized: source_bus=%s, %d buses, %d branches, " "%d generators, down_buses=%s",
             self.area_name,
             self.source_bus,
             len(case.bus_data),
@@ -279,14 +268,10 @@ class DistopfFederate:
         ):
             if eq_id == source:
                 to_bus = to_eq.split(".", 1)[0]
-                logger.debug(
-                    "Resolved source '%s' (switch ID) → bus '%s'", source, to_bus
-                )
+                logger.debug("Resolved source '%s' (switch ID) → bus '%s'", source, to_bus)
                 return to_bus
 
-        logger.warning(
-            "Could not resolve source '%s' to a bus name; using it verbatim.", source
-        )
+        logger.warning("Could not resolve source '%s' to a bus name; using it verbatim.", source)
         return source
 
     def _collect_gen_tags(self, topology: Topology) -> dict:
@@ -354,9 +339,7 @@ class DistopfFederate:
         try:
             area_cases = decompose(full_case, sources)
         except Exception:
-            logger.exception(
-                "decompose() failed for area '%s'; falling back to full case", self.area_name
-            )
+            logger.exception("decompose() failed for area '%s'; falling back to full case", self.area_name)
             self.sub_case = full_case
             return
 
@@ -376,7 +359,6 @@ class DistopfFederate:
                 len(self.sub_case.branch_data),
             )
 
-
     def _read_injection(self) -> Injection | None:
         if self.sub.injections.is_updated():
             return Injection.parse_obj(self.sub.injections.json)
@@ -384,10 +366,7 @@ class DistopfFederate:
 
     def _read_voltages_mag(self) -> VoltagesMagnitude | None:
         """Compute voltage magnitude from real/imag subscriptions if updated."""
-        if not (
-            self.sub.voltages_real.is_updated()
-            and self.sub.voltages_imag.is_updated()
-        ):
+        if not (self.sub.voltages_real.is_updated() and self.sub.voltages_imag.is_updated()):
             return None
         vr = VoltagesReal.parse_obj(self.sub.voltages_real.json)
         vi = VoltagesImaginary.parse_obj(self.sub.voltages_imag.json)
@@ -476,13 +455,13 @@ class DistopfFederate:
         max_dev = 0.0
         if self._prev_s_up_vals:
             if len(curr_vals) == len(self._prev_s_up_vals):
-                max_dev = max(
-                    abs(c - p) for c, p in zip(curr_vals, self._prev_s_up_vals)
-                )
+                max_dev = max(abs(c - p) for c, p in zip(curr_vals, self._prev_s_up_vals))
                 if max_dev <= self.static.vup_tol:
                     logger.debug(
                         "Area '%s' boundary converged (dev=%.2e <= tol=%.2e)",
-                        self.area_name, max_dev, self.static.vup_tol,
+                        self.area_name,
+                        max_dev,
+                        self.static.vup_tol,
                     )
                     self.converged = True
         self._prev_s_up_vals = list(curr_vals)
@@ -500,7 +479,6 @@ class DistopfFederate:
             feasibility_gap=float(getattr(result, "feasibility_gap", 0.0) or 0.0),
         )
         _safe_publish(self.pub_solver_stats, stats.json())
-
 
     def first_pub(self, t: float) -> None:
         """Publish empty initial values at the start of each timestep's iteration loop."""
@@ -606,10 +584,7 @@ class DistopfFederate:
             logger.debug("Starting time/iteration loop")
 
             while True:
-                if (
-                    self.static.number_of_timesteps > 0
-                    and granted_time >= self.static.number_of_timesteps
-                ):
+                if self.static.number_of_timesteps > 0 and granted_time >= self.static.number_of_timesteps:
                     logger.info(
                         "Reached end time %d. Exiting loop.",
                         self.static.number_of_timesteps,
@@ -624,9 +599,7 @@ class DistopfFederate:
 
                 while True:
                     logger.debug("Requesting time %s with flag %s", request_time, itr_flag)
-                    granted_time, itr_status = h.helicsFederateRequestTimeIterative(
-                        self.fed, request_time, itr_flag
-                    )
+                    granted_time, itr_status = h.helicsFederateRequestTimeIterative(self.fed, request_time, itr_flag)
                     logger.info("\tgranted time = %s", granted_time)
                     logger.info("\titr status = %s", itr_status)
 
@@ -634,11 +607,7 @@ class DistopfFederate:
                         logger.info("HELICS Max Time reached. Exiting loop.")
                         break
 
-                    if (
-                        granted_time > 0.0
-                        and self.itr == 0
-                        and not self.sub.voltages_real.is_updated()
-                    ):
+                    if granted_time > 0.0 and self.itr == 0 and not self.sub.voltages_real.is_updated():
                         logger.info("Feeder disconnected. Exiting loop.")
                         granted_time = h.HELICS_TIME_MAXTIME
                         break
@@ -661,10 +630,7 @@ class DistopfFederate:
                     else:
                         itr_flag = itr_need
 
-                if (
-                    granted_time >= h.HELICS_TIME_MAXTIME
-                    or itr_status == h.helics_iteration_result_error
-                ):
+                if granted_time >= h.HELICS_TIME_MAXTIME or itr_status == h.helics_iteration_result_error:
                     break
 
         finally:

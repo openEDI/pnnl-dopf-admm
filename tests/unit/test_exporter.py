@@ -4,6 +4,8 @@ import math
 from unittest.mock import patch
 
 import pandas as pd
+from oedisi.types.data_types import MeasurementArray
+
 from distopf_federate.exporter import (
     enapp_s_up_to_pq,
     enapp_v_dn_to_vmag,
@@ -15,7 +17,6 @@ from distopf_federate.exporter import (
     result_to_voltage_angle,
     result_to_voltage_mag,
 )
-from oedisi.types.data_types import MeasurementArray
 
 # ---------------------------------------------------------------------------
 # Minimal PowerFlowResult stub so tests have no distopf/HELICS dependency
@@ -56,8 +57,7 @@ def _make_voltage_df(buses=("bus1", "bus2"), v_a=1.05, v_b=1.04, v_c=1.03):
 
 def _make_flow_df(from_name="bus1", to_name="bus2", fb=1, tb=2, p=0.05, q=0.02):
     return pd.DataFrame(
-        [{"from_name": from_name, "to_name": to_name, "fb": fb, "tb": tb, "t": 0,
-          "a": p, "b": p, "c": p}]
+        [{"from_name": from_name, "to_name": to_name, "fb": fb, "tb": tb, "t": 0, "a": p, "b": p, "c": p}]
     )
 
 
@@ -100,8 +100,7 @@ def test_result_to_voltage_mag_empty_result():
 
 
 def test_result_to_voltage_mag_nan_skipped():
-    df = pd.DataFrame([{"id": 1, "name": "bus1", "t": 0,
-                        "a": float("nan"), "b": 1.0, "c": float("nan")}])
+    df = pd.DataFrame([{"id": 1, "name": "bus1", "t": 0, "a": float("nan"), "b": 1.0, "c": float("nan")}])
     result = _FakeResult(voltages=df)
     vmag = result_to_voltage_mag(result, {"bus1": 1000.0}, time=0)
     assert len(vmag.ids) == 1
@@ -293,20 +292,24 @@ def test_result_to_solver_stats_pydantic_roundtrip():
     assert deserialized.values[deserialized.ids.index("vup")] == 0.01
 
 
-
-
 # ---------------------------------------------------------------------------
 # ENAPP boundary encoding helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_s_up_df(name="area_150", p_a=0.5, p_b=0.4, p_c=0.3, q_a=0.1, q_b=0.08, q_c=0.06):
     """Return a minimal parse_s_up-style DataFrame."""
-    return pd.DataFrame([{
-        "name": name, "t": 0,
-        "a": complex(p_a, q_a),
-        "b": complex(p_b, q_b),
-        "c": complex(p_c, q_c),
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "name": name,
+                "t": 0,
+                "a": complex(p_a, q_a),
+                "b": complex(p_b, q_b),
+                "c": complex(p_c, q_c),
+            }
+        ]
+    )
 
 
 def _make_v_dn_df(area_names=("area_152",), v=1.02):
@@ -332,9 +335,9 @@ def test_enapp_s_up_to_pq_encodes_area_name(mock_parse_s_up):
     pub_p, pub_q = enapp_s_up_to_pq(_FakeCase(), _FakeResultEnapp(), "area_152", time=0)
 
     # IDs should use the publishing area name, not the SWING bus name "area_150"
-    assert all(id_.startswith("area_152.") for id_ in pub_p.ids), (
-        f"Expected ids to start with 'area_152.', got {pub_p.ids}"
-    )
+    assert all(
+        id_.startswith("area_152.") for id_ in pub_p.ids
+    ), f"Expected ids to start with 'area_152.', got {pub_p.ids}"
     # Values should be in Watts (per-unit × S_BASE)
     assert any(abs(v) > 0 for v in pub_p.values), "Expected non-zero P values"
     # P and Q should have matching IDs
@@ -360,7 +363,8 @@ def test_enapp_v_dn_to_vmag_encodes_child_names(mock_parse_v_dn):
     mock_parse_v_dn.return_value = v_df
 
     vmag = enapp_v_dn_to_vmag(
-        _FakeCase(), _FakeResultEnapp(),
+        _FakeCase(),
+        _FakeResultEnapp(),
         down_buses=["area_152", "area_135"],
         time=0,
     )
