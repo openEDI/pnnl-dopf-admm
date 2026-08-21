@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from oedisi.types.common import DefaultFileNames
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 
 class StaticInputs(BaseModel):
@@ -89,10 +89,10 @@ class ComponentDefinition(BaseModel):
         if not mapping_path.exists():
             raise FileNotFoundError(f"Input mapping file not found: {mapping_path}")
 
-        with open(static_path, "r", encoding="utf-8") as fh:
+        with open(static_path, encoding="utf-8") as fh:
             raw_static = json.load(fh)
 
-        with open(mapping_path, "r", encoding="utf-8") as fh:
+        with open(mapping_path, encoding="utf-8") as fh:
             raw_mapping: dict[str, Any] = json.load(fh)
 
         static_inputs = StaticInputs.model_validate(raw_static)

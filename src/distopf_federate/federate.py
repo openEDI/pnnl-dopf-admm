@@ -13,16 +13,17 @@ Run via the installed entry point:
 import json
 import logging
 import time as _time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
 
+import distopf as opf
 import helics as h
+from distopf.distributed.spatial.decompose import decompose
 from oedisi.types.common import BrokerConfig, DefaultFileNames
 from oedisi.types.data_types import (
     Injection,
-    MeasurementArray,
     PowersAngle,
     PowersImaginary,
     PowersMagnitude,
@@ -33,16 +34,6 @@ from oedisi.types.data_types import (
     VoltagesReal,
 )
 
-import distopf as opf
-from distopf.distributed.spatial.decompose import decompose
-
-from distopf_federate.schemas import ComponentDefinition, StaticInputs
-from distopf_federate.importer import (
-    apply_s_up_to_sub_case,
-    apply_v_dn_to_sub_case,
-    topology_to_case,
-    update_case_from_measurements,
-)
 from distopf_federate.exporter import (
     enapp_s_up_to_pq,
     enapp_v_dn_to_vmag,
@@ -53,6 +44,13 @@ from distopf_federate.exporter import (
     result_to_solver_stats,
     result_to_voltage_mag,
 )
+from distopf_federate.importer import (
+    apply_s_up_to_sub_case,
+    apply_v_dn_to_sub_case,
+    topology_to_case,
+    update_case_from_measurements,
+)
+from distopf_federate.schemas import ComponentDefinition, StaticInputs
 
 logger = logging.getLogger(__name__)
 # Libraries should not configure the root logger; callers decide handler/level.
@@ -95,20 +93,20 @@ class DistopfFederate:
 
     def __init__(self, broker_config: BrokerConfig) -> None:
         # Full-network case (built from topology once)
-        self.case: Optional[opf.Case] = None
+        self.case: opf.Case | None = None
         # Per-area decomposed sub-network case (solved each iteration)
-        self.sub_case: Optional[opf.Case] = None
+        self.sub_case: opf.Case | None = None
         # This federate's area name (e.g. "area_152" or "area_150" for root)
-        self.area_name: Optional[str] = None
+        self.area_name: str | None = None
         # Resolved source bus name (may differ from static.source_bus if source is a switch ID)
-        self.source_bus: Optional[str] = None
+        self.source_bus: str | None = None
         # Child area names (dummy PQ node names in sub_case)
         self.down_buses: list = []
         # Previous iteration boundary S_up values for convergence tracking
         self._prev_s_up_vals: list = []
-        self.name_to_id: Optional[dict] = None
-        self.v_ln_base_map: Optional[dict] = None
-        self.gen_tags: Optional[dict] = None
+        self.name_to_id: dict | None = None
+        self.v_ln_base_map: dict | None = None
+        self.gen_tags: dict | None = None
         self._initialized: bool = False
 
         self.sub = Subscriptions()
@@ -120,13 +118,13 @@ class DistopfFederate:
 
     def load_static_inputs(self) -> None:
         path = Path(DefaultFileNames.STATIC_INPUTS.value)
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             config = json.load(fh)
         self.static = StaticInputs.model_validate(config)
 
     def load_input_mapping(self) -> None:
         path = Path(DefaultFileNames.INPUT_MAPPING.value)
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             self.inputs = json.load(fh)
 
     def initialize(self, broker_config: BrokerConfig) -> None:
@@ -204,7 +202,7 @@ class DistopfFederate:
             else None
         )
 
-    def _get_objective_fn(self) -> Optional[Callable]:
+    def _get_objective_fn(self) -> Callable | None:
         return OBJECTIVES.get(self.static.objective)
 
     def init_area(self) -> None:
@@ -379,12 +377,12 @@ class DistopfFederate:
             )
 
 
-    def _read_injection(self) -> Optional[Injection]:
+    def _read_injection(self) -> Injection | None:
         if self.sub.injections.is_updated():
             return Injection.parse_obj(self.sub.injections.json)
         return None
 
-    def _read_voltages_mag(self) -> Optional[VoltagesMagnitude]:
+    def _read_voltages_mag(self) -> VoltagesMagnitude | None:
         """Compute voltage magnitude from real/imag subscriptions if updated."""
         if not (
             self.sub.voltages_real.is_updated()

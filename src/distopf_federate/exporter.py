@@ -2,10 +2,10 @@
 
 import logging
 import math
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any
 
 import pandas as pd
-
 from oedisi.types.data_types import (
     MeasurementArray,
     PowersAngle,
@@ -42,8 +42,8 @@ def _iter_branch_pq(result) -> Iterator[tuple]:
     Looks up the matching reactive-power row from *result.reactive_power_flows*
     by (fb, tb, t) index.  Skips entries where P is None or NaN.
     """
-    p_df: Optional[pd.DataFrame] = getattr(result, "active_power_flows", None)
-    q_df: Optional[pd.DataFrame] = getattr(result, "reactive_power_flows", None)
+    p_df: pd.DataFrame | None = getattr(result, "active_power_flows", None)
+    q_df: pd.DataFrame | None = getattr(result, "reactive_power_flows", None)
     if p_df is None:
         return
 
@@ -119,7 +119,7 @@ def result_to_voltage_angle(
         ids in format "BUSNAME.1/2/3", values in degrees (units match distopf output).
     """
     ids, values = [], []
-    angle_df: Optional[pd.DataFrame] = getattr(result, "voltage_angles", None)
+    angle_df: pd.DataFrame | None = getattr(result, "voltage_angles", None)
     if angle_df is None:
         return VoltagesAngle(ids=ids, values=values, time=time)
 
@@ -222,8 +222,8 @@ def result_to_pub_pqv(
             v_vals.append(v_pu * v_base)
 
     # Boundary branch power flows (flows into boundary buses)
-    p_df: Optional[pd.DataFrame] = getattr(result, "active_power_flows", None)
-    q_df: Optional[pd.DataFrame] = getattr(result, "reactive_power_flows", None)
+    p_df: pd.DataFrame | None = getattr(result, "active_power_flows", None)
+    q_df: pd.DataFrame | None = getattr(result, "reactive_power_flows", None)
 
     if p_df is not None:
         p_boundary = p_df.loc[p_df["to_name"].astype(str).isin(boundary_buses)]
@@ -389,8 +389,8 @@ def result_to_commands(
     """
     commands = []
 
-    p_gen: Optional[pd.DataFrame] = getattr(result, "active_power_generation", None)
-    q_gen: Optional[pd.DataFrame] = getattr(result, "reactive_power_generation", None)
+    p_gen: pd.DataFrame | None = getattr(result, "active_power_generation", None)
+    q_gen: pd.DataFrame | None = getattr(result, "reactive_power_generation", None)
 
     if p_gen is None:
         return commands
@@ -449,8 +449,8 @@ def result_to_controls_pq(
     p_ids, p_eq_ids, p_vals = [], [], []
     q_ids, q_eq_ids, q_vals = [], [], []
 
-    p_gen: Optional[pd.DataFrame] = getattr(result, "active_power_generation", None)
-    q_gen: Optional[pd.DataFrame] = getattr(result, "reactive_power_generation", None)
+    p_gen: pd.DataFrame | None = getattr(result, "active_power_generation", None)
+    q_gen: pd.DataFrame | None = getattr(result, "reactive_power_generation", None)
 
     if p_gen is not None:
         q_lookup: dict = {}
@@ -503,7 +503,7 @@ def _clean_float(val: Any) -> float:
 
 def result_to_solver_stats(
     converged: bool,
-    objective_value: Optional[float],
+    objective_value: float | None,
     iterations: int,
     solve_time: float,
     time: int,

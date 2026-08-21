@@ -45,8 +45,8 @@ async def configure(config: dict):
         for link in config.get("links", []):
             links[link["target_port"]] = f"{link['source']}/{link['source_port']}"
 
-        validated_dyn_inputs = DynamicInputs.model_validate(links)
-        validated_dyn_outputs = DynamicOutputs.model_validate(links)
+        DynamicInputs.model_validate(links)
+        DynamicOutputs.model_validate(links)
 
         with open(DefaultFileNames.INPUT_MAPPING.value, "w") as fh:
             json.dump(links, fh, indent=2)

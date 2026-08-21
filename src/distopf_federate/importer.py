@@ -1,15 +1,19 @@
 """Convert oedisi Topology and live measurements to a distopf Case."""
 
 import logging
-from typing import Optional
 
+import distopf as opf
 import networkx as nx
 import numpy as np
 import pandas as pd
-
-import distopf as opf
 from distopf.api import Case
-from oedisi.types.data_types import Injection, PowersImaginary, PowersReal, Topology, VoltagesMagnitude
+from oedisi.types.data_types import (
+    Injection,
+    PowersImaginary,
+    PowersReal,
+    Topology,
+    VoltagesMagnitude,
+)
 
 from distopf_federate.constants import MIN_GEN_SA_PU, S_BASE
 
@@ -422,7 +426,7 @@ def update_case_from_measurements(
     case: Case,
     injection: Injection,
     name_to_id: dict,
-    voltages_mag: Optional[VoltagesMagnitude] = None,
+    voltages_mag: VoltagesMagnitude | None = None,
 ) -> Case:
     """Update bus_data loads and gen_data generation from live OEDISI measurements.
 
