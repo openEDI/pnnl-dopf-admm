@@ -17,19 +17,14 @@ dependencies = [
 	"uvicorn",
 	"fastapi",
 	"pyarrow",
-	"geopy",
 	"scipy",
 	"cvxpy",
 	"matplotlib",
-	"plotly",
+	"seaborn",
 	"numpy",
 	"pandas",
-	"OpenDSSDirect.py[extras]==0.9.4",
-	"boto3",
-	"xarray",
-	"oedisi @ git+https://github.com/Tylores/oedisi.git@bugfix/ignore-dotfiles-copy",
-	"bokeh",
 	"networkx",
+	"oedisi @ git+https://github.com/Tylores/oedisi.git@bugfix/ignore-dotfiles-copy",
 	"distopf",
 ]
 
@@ -54,15 +49,16 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.black]
-line-length = 88
+line-length = 120
 target-version = ["py310"]
 
 [tool.ruff]
-line-length = 88
+line-length = 120
 target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+ignore = ["E501", "E402"]
 
 [tool.uv.sources]
 distopf = { git = "https://github.com/GRIDAPPSD/distopf", branch = "feature/enapp" }
