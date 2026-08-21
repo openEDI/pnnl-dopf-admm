@@ -477,15 +477,26 @@ def update_case_from_measurements(
             pv = data["pv"]
             total_p_pu = pv[:, 0].sum() / S_BASE
             sa_max_pu = max(total_p_pu, 0.0)
-            case.gen_data.loc[mask, "pa"] = pv[0, 0] / S_BASE
-            case.gen_data.loc[mask, "pb"] = pv[1, 0] / S_BASE
-            case.gen_data.loc[mask, "pc"] = pv[2, 0] / S_BASE
-            case.gen_data.loc[mask, "qa"] = pv[0, 1] / S_BASE
-            case.gen_data.loc[mask, "qb"] = pv[1, 1] / S_BASE
-            case.gen_data.loc[mask, "qc"] = pv[2, 1] / S_BASE
-            case.gen_data.loc[mask, ["sa_max", "sb_max", "sc_max"]] = sa_max_pu
-            case.gen_data.loc[mask, ["qa_max", "qb_max", "qc_max"]] = sa_max_pu
-            case.gen_data.loc[mask, ["qa_min", "qb_min", "qc_min"]] = -sa_max_pu
+            if "p_a" in case.gen_data.columns:
+                case.gen_data.loc[mask, "p_a"] = pv[0, 0] / S_BASE
+                case.gen_data.loc[mask, "p_b"] = pv[1, 0] / S_BASE
+                case.gen_data.loc[mask, "p_c"] = pv[2, 0] / S_BASE
+                case.gen_data.loc[mask, "q_a"] = pv[0, 1] / S_BASE
+                case.gen_data.loc[mask, "q_b"] = pv[1, 1] / S_BASE
+                case.gen_data.loc[mask, "q_c"] = pv[2, 1] / S_BASE
+                case.gen_data.loc[mask, ["s_a_max", "s_b_max", "s_c_max"]] = sa_max_pu
+                case.gen_data.loc[mask, ["q_a_max", "q_b_max", "q_c_max"]] = sa_max_pu
+                case.gen_data.loc[mask, ["q_a_min", "q_b_min", "q_c_min"]] = -sa_max_pu
+            else:
+                case.gen_data.loc[mask, "pa"] = pv[0, 0] / S_BASE
+                case.gen_data.loc[mask, "pb"] = pv[1, 0] / S_BASE
+                case.gen_data.loc[mask, "pc"] = pv[2, 0] / S_BASE
+                case.gen_data.loc[mask, "qa"] = pv[0, 1] / S_BASE
+                case.gen_data.loc[mask, "qb"] = pv[1, 1] / S_BASE
+                case.gen_data.loc[mask, "qc"] = pv[2, 1] / S_BASE
+                case.gen_data.loc[mask, ["sa_max", "sb_max", "sc_max"]] = sa_max_pu
+                case.gen_data.loc[mask, ["qa_max", "qb_max", "qc_max"]] = sa_max_pu
+                case.gen_data.loc[mask, ["qa_min", "qb_min", "qc_min"]] = -sa_max_pu
 
     # Update swing bus voltage from live measurements
     if voltages_mag is not None:
