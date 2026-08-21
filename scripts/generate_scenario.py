@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import sys
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -13,18 +14,18 @@ from oedisi.componentframework.system_configuration import (
 )
 from oedisi.types.data_types import Topology
 
-try:
-    from distopf.distributed.spatial.decompose import (
-        build_graph as generate_graph,
-        decompose_graph as area_disconnects,
-    )
-except ImportError:
-    generate_graph = None
-    area_disconnects = None
-
-
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 COMPONENT_DIR = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, os.path.join(COMPONENT_DIR, "src"))
+
+from distopf_federate.plotting import (
+    area_disconnects,
+    disconnect_areas,
+    generate_graph,
+    get_area_source,
+    reconnect_area_switches,
+)
+
 ALGO = "pnnl_dopf_admm"
 NAME = ""
 OUTPUTS = "../../outputs"
@@ -650,7 +651,7 @@ def generate_for_model(
         f.write(system.model_dump_json())
 
     with open(f"{SCENARIOS}/{system.name}.json") as f:
-        check = WiringDiagram.model_validate_json(f.read())
+        WiringDiagram.model_validate_json(f.read())
 
     plot_network(
         G,

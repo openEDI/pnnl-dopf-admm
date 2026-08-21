@@ -8,7 +8,10 @@ the feeder and ADMM areas to validate the performance and convergence of the ADM
 import argparse
 import logging
 import sys
+import warnings
 from pathlib import Path
+
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
 # Add the component's src directory to sys.path so we can import admm_federate modules
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -17,39 +20,35 @@ sys.path.insert(0, str(COMPONENT_DIR / "src"))
 
 try:
     import matplotlib.pyplot as plt
-    from oedisi.types.data_types import Topology
-    from distopf.distributed.spatial.decompose import (
-        build_graph as generate_graph,
-        decompose_graph as area_disconnects,
-    )
-
+    from distopf_federate.plotting import (
+        area_disconnects,
         configure_publication_style,
-        load_scenario_parameters,
+        disconnect_areas,
+        generate_graph,
         get_der_mapping,
-        load_recorder_data,
-        process_voltages,
-        process_power_flows,
-        process_generation_adequacy,
-        process_convergence,
         get_max_diff_timestep,
-        plot_voltage_comparison,
-        plot_power_flow_comparison,
-        plot_generation_adequacy,
+        load_recorder_data,
+        load_scenario_parameters,
         plot_algorithmic_convergence,
-        plot_voltage_scatter_at_timestep,
-        plot_power_scatter_at_timestep,
+        plot_generation_adequacy,
         plot_network_partition,
+        plot_power_flow_comparison,
+        plot_power_scatter_at_timestep,
+        plot_voltage_comparison,
+        plot_voltage_scatter_at_timestep,
+        process_convergence,
+        process_generation_adequacy,
+        process_power_flows,
+        process_voltages,
     )
+    from oedisi.types.data_types import Topology
 except ImportError as e:
     print(
-        f"Error importing admm_federate or oedisi modules: {e}. "
+        f"Error importing distopf_federate or oedisi modules: {e}. "
         "Ensure the script is executed within the project virtual environment.",
         file=sys.stderr,
     )
     sys.exit(1)
-
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # Configure logging
 logging.basicConfig(
