@@ -177,9 +177,11 @@ def test_topology_to_case_branch_topology(minimal_case):
 
 def test_topology_to_case_branch_impedance_positive(minimal_case):
     case, _, _ = minimal_case
-    # With Y_DIAG = 100 S, R = 1/100 = 0.01 Ω → small but positive raa
-    assert (case.branch_data["raa"] >= 0.0).all()
-    assert (case.branch_data["xaa"] >= 0.0).all()
+    # With Y_DIAG = 100 S, R = 1/100 = 0.01 Ω → small but positive raa / r_aa
+    r_col = "r_aa" if "r_aa" in case.branch_data.columns else "raa"
+    x_col = "x_aa" if "x_aa" in case.branch_data.columns else "xaa"
+    assert (case.branch_data[r_col] >= 0.0).all()
+    assert (case.branch_data[x_col] >= 0.0).all()
 
 
 def test_topology_to_case_load_at_bus3(minimal_case):
@@ -205,7 +207,8 @@ def test_topology_to_case_gen_data_has_pvsystem(minimal_case):
     assert len(case.gen_data) == 1
     assert case.gen_data.iloc[0]["name"] == "bus3"
     # 50 kW = 0.05 per-unit
-    assert abs(case.gen_data.iloc[0]["pa"] - 0.05) < 1e-9
+    p_col = "p_a" if "p_a" in case.gen_data.columns else "pa"
+    assert abs(case.gen_data.iloc[0][p_col] - 0.05) < 1e-9
 
 
 def test_topology_to_case_v_ln_base_map(minimal_case):
@@ -266,7 +269,8 @@ def test_update_case_pv_generation_changes(minimal_case):
 
     bus3_id = name_to_id["bus3"]
     gen_row = case.gen_data[case.gen_data["id"] == bus3_id].iloc[0]
-    assert abs(gen_row["pa"] - 0.08) < 1e-9, f"pa after update = {gen_row['pa']}"
+    p_val = gen_row["p_a"] if "p_a" in gen_row else gen_row["pa"]
+    assert abs(p_val - 0.08) < 1e-9, f"p_a/pa after update = {p_val}"
 
 
 def test_update_case_unknown_bus_is_ignored(minimal_case):
