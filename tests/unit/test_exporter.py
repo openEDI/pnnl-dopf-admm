@@ -1,15 +1,9 @@
 """Unit tests for distopf_federate.exporter."""
 
 import math
-import sys
-from pathlib import Path
-from typing import Optional
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
-import pytest
-
-from oedisi.types.data_types import MeasurementArray
 from distopf_federate.exporter import (
     enapp_s_up_to_pq,
     enapp_v_dn_to_vmag,
@@ -21,7 +15,7 @@ from distopf_federate.exporter import (
     result_to_voltage_angle,
     result_to_voltage_mag,
 )
-
+from oedisi.types.data_types import MeasurementArray
 
 # ---------------------------------------------------------------------------
 # Minimal PowerFlowResult stub so tests have no distopf/HELICS dependency
@@ -335,7 +329,6 @@ def test_enapp_s_up_to_pq_encodes_area_name(mock_parse_s_up):
     s_up_df = _make_s_up_df(name="area_150", p_a=0.5, q_a=0.1)
     mock_parse_s_up.return_value = s_up_df
 
-    from distopf_federate.constants import S_BASE
     pub_p, pub_q = enapp_s_up_to_pq(_FakeCase(), _FakeResultEnapp(), "area_152", time=0)
 
     # IDs should use the publishing area name, not the SWING bus name "area_150"

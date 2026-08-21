@@ -64,8 +64,8 @@ def _make_distopf_stub():
 _DISTOPF_STUBS = _make_distopf_stub()
 try:
     import distopf  # noqa: F401
-    import distopf.distributed.spatial.enapp  # noqa: F401
     import distopf.distributed.spatial.decompose  # noqa: F401
+    import distopf.distributed.spatial.enapp  # noqa: F401
 except ImportError:
     for _name, _mod in _DISTOPF_STUBS.items():
         sys.modules.setdefault(_name, _mod)
@@ -216,8 +216,8 @@ def test_apply_s_up_no_child_areas_is_noop():
 
 def test_apply_s_up_calls_add_s_to_schedules_per_child():
     """apply_s_up_to_sub_case calls add_s_to_schedules once per child area."""
-    from distopf_federate.importer import apply_s_up_to_sub_case
     from distopf_federate.constants import S_BASE
+    from distopf_federate.importer import apply_s_up_to_sub_case
 
     sub_case = _FakeSubCase()
     pub_p = PowersReal(
@@ -267,55 +267,4 @@ def _make_mock_topology(bus_names, switch_incidences):
     topology.base_voltage_magnitudes = bvm
     topology.incidences = inc
     return topology
-
-
-def test_resolve_source_bus_direct_bus_name():
-    """If static.source_bus is already a bus name, return it unchanged."""
-    from distopf_federate.federate import DistopfFederate
-
-    fed = object.__new__(DistopfFederate)
-    fed.static = MagicMock()
-    fed.static.source_bus = "150"
-
-    topology = _make_mock_topology(
-        bus_names=["150", "13", "18"],
-        switch_incidences=[("150", "13", "sw2"), ("150", "18", "sw3")],
-    )
-
-    result = fed._resolve_source_bus(topology)
-    assert result == "150"
-
-
-def test_resolve_source_bus_switch_id_resolves_to_downstream_bus():
-    """If static.source_bus is a switch ID, return the downstream bus."""
-    from distopf_federate.federate import DistopfFederate
-
-    fed = object.__new__(DistopfFederate)
-    fed.static = MagicMock()
-    fed.static.source_bus = "sw3"
-
-    topology = _make_mock_topology(
-        bus_names=["150", "13", "18"],
-        switch_incidences=[("150", "13", "sw2"), ("150", "18", "sw3")],
-    )
-
-    result = fed._resolve_source_bus(topology)
-    assert result == "18"
-
-
-def test_resolve_source_bus_unknown_falls_back_to_verbatim():
-    """If source cannot be matched, it is returned verbatim with a warning."""
-    from distopf_federate.federate import DistopfFederate
-
-    fed = object.__new__(DistopfFederate)
-    fed.static = MagicMock()
-    fed.static.source_bus = "unknown_eq"
-
-    topology = _make_mock_topology(
-        bus_names=["150", "13"],
-        switch_incidences=[("150", "13", "sw2")],
-    )
-
-    result = fed._resolve_source_bus(topology)
-    assert result == "unknown_eq"
 

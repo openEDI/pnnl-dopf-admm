@@ -8,6 +8,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
+from distopf_federate.importer import (
+    _phases_to_str,
+    topology_to_case,
+    update_case_from_measurements,
+)
 from oedisi.types.data_types import (
     AdmittanceSparse,
     IncidenceList,
@@ -16,12 +21,6 @@ from oedisi.types.data_types import (
     PowersReal,
     Topology,
     VoltagesMagnitude,
-)
-
-from distopf_federate.importer import (
-    _phases_to_str,
-    topology_to_case,
-    update_case_from_measurements,
 )
 
 # ---------------------------------------------------------------------------
