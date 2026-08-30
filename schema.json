@@ -87,12 +87,6 @@
       "title": "Relaxed",
       "type": "boolean"
     },
-    "control_type": {
-      "default": "real",
-      "description": "Control mode (e.g. 'real', 'reactive')",
-      "title": "Control Type",
-      "type": "string"
-    },
     "number_of_timesteps": {
       "default": 1,
       "description": "Total number of simulation timesteps",

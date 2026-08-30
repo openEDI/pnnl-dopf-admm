@@ -33,7 +33,6 @@ class StaticInputs(BaseModel):
     rho_sdn: float = Field(1000.0, description="ADMM penalty parameter for active/reactive power flow discrepancy")
     max_itr: int = Field(100, description="Maximum number of ADMM iterations per step")
     relaxed: bool = Field(False, description="Boolean flag to enable relaxed model formulation")
-    control_type: str = Field("real", description="Control mode (e.g. 'real', 'reactive')")
     number_of_timesteps: int = Field(1, description="Total number of simulation timesteps")
     deltat: float = Field(3600.0, description="Co-simulation time step interval in seconds")
     objective: ObjectiveType = Field(
