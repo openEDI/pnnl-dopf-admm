@@ -89,3 +89,54 @@ def test_run_opf_execution_for_all_objectives(obj_type: ObjectiveType) -> None:
     assert result.objective_value is not None
     assert len(result.voltages) > 0
     assert len(result.active_power_flows) > 0
+
+
+def test_format_area_label() -> None:
+    """format_area_label should produce compact bracketed labels."""
+    from distopf_federate.plotting import format_area_label
+
+    area_params = {
+        0: {"objective": "minimize_loss"},
+        1: {"objective": "minimize_curtail"},
+        2: {"objective": "maximize_gen"},
+        3: {"objective": "minimize_load"},
+        4: {},
+    }
+    assert format_area_label(0, area_params) == "Area 0 (Loss Min)"
+    assert format_area_label(1, area_params) == "Area 1 (Curtail Min)"
+    assert format_area_label(2, area_params) == "Area 2 (Gen Max)"
+    assert format_area_label(3, area_params) == "Area 3 (Load Min)"
+    assert format_area_label(0, area_params, multiline=True) == "Area 0\n(Loss Min)"
+    assert format_area_label(4, area_params) == "Area 4"
+    assert format_area_label(5, None) == "Area 5"
+
+
+def test_load_scenario_parameters_extracts_objectives() -> None:
+    """load_scenario_parameters should correctly extract objective strings for all areas."""
+    from distopf_federate.plotting import load_scenario_parameters
+
+    sample_scenario = {
+        "components": [
+            {
+                "name": "pnnl_dopf_admm_0",
+                "type": "DOPFADMMComponent",
+                "parameters": {"source_bus": "150", "objective": "minimize_loss"},
+            },
+            {
+                "name": "pnnl_dopf_admm_1",
+                "type": "DOPFADMMComponent",
+                "parameters": {"source_bus": "18", "objective": "minimize_curtail"},
+            },
+            {
+                "name": "pnnl_dopf_admm_2",
+                "type": "DOPFADMMComponent",
+                "parameters": {"source_bus": "13"},  # Default
+            },
+        ]
+    }
+    area_ids, area_params = load_scenario_parameters(sample_scenario)
+    assert area_ids == [0, 1, 2]
+    assert area_params[0]["objective"] == "minimize_loss"
+    assert area_params[1]["objective"] == "minimize_curtail"
+    assert area_params[2]["objective"] == "maximize_gen"
+

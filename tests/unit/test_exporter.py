@@ -214,11 +214,9 @@ def test_result_to_commands_emits_for_known_bus():
     gen_tags = {"bus3": ["PVSystem.pv3"]}
     commands = result_to_commands(result, gen_tags, time=0)
 
-    assert len(commands) == 1
-    eq_id, p_w, q_var = commands[0]
-    assert eq_id == "PVSystem.pv3"
-    assert abs(p_w - 0.05 * 1e6) < 1.0
-    assert abs(q_var - 0.01 * 1e6) < 1.0
+    assert len(commands) == 2
+    assert commands[0] == {"obj_name": "PVSystem.pv3", "obj_property": "Pmpp", "val": "50.0000"}
+    assert commands[1] == {"obj_name": "PVSystem.pv3", "obj_property": "kvar", "val": "10.0000"}
 
 
 def test_result_to_commands_skips_zero_setpoints():
