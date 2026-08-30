@@ -60,7 +60,6 @@ Each area federate can be configured with an independent optimization objective 
 | `source_bus` | `str` | `""` | Boundary source bus name (e.g. `"150"`) or boundary switch ID (e.g. `"sw3"`). |
 | `source_line` | `str` | `""` | Boundary line or switch ID connected to the source bus. |
 | `switches` | `list[str]` | `[]` | List of controllable switch IDs bounding this area. |
-| `control_type` | `str` | `"real"` | Control mode (`"real"` or `"reactive"`). |
 | `vup_tol` | `float` | `0.001` | ADMM convergence tolerance for upstream voltage mismatch. |
 | `sdn_tol` | `float` | `0.001` | ADMM convergence tolerance for power mismatch. |
 | `rho_vup` | `float` | `1000.0` | ADMM penalty parameter for upstream voltage. |

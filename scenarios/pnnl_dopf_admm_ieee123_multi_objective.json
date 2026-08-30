@@ -152,7 +152,7 @@
       "parameters": {
         "name": "hub_voltage",
         "max_itr": 10,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 28800
       }
     },
     {
@@ -163,7 +163,7 @@
       "image": "",
       "parameters": {
         "max_itr": 10,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 28800
       }
     },
     {
@@ -174,7 +174,7 @@
       "image": "",
       "parameters": {
         "max_itr": 10,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 28800
       }
     },
     {
@@ -188,7 +188,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw2",
           "sw3"
@@ -227,7 +226,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw3"
         ],
@@ -265,7 +263,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw2",
           "sw4"
@@ -304,7 +301,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw4",
           "sw5"
@@ -343,7 +339,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw5"
         ],

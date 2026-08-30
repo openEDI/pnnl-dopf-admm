@@ -188,7 +188,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw2",
           "sw3"
@@ -226,7 +225,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw3"
         ],
@@ -263,7 +261,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw2",
           "sw4"
@@ -301,7 +298,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw4",
           "sw5"
@@ -339,7 +335,6 @@
         "sdn_tol": 0.01,
         "max_itr": 10,
         "relaxed": false,
-        "control_type": "reactive",
         "switches": [
           "sw5"
         ],
