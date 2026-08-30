@@ -1,5 +1,5 @@
 {
-  "name": "pnnl_dopf_admm_ieee123",
+  "name": "pnnl_dopf_admm_ieee123_multi_objective",
   "components": [
     {
       "name": "reference_feeder",
@@ -152,7 +152,7 @@
       "parameters": {
         "name": "hub_voltage",
         "max_itr": 10,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 28800
       }
     },
     {
@@ -163,7 +163,7 @@
       "image": "",
       "parameters": {
         "max_itr": 10,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 28800
       }
     },
     {
@@ -174,7 +174,7 @@
       "image": "",
       "parameters": {
         "max_itr": 10,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 28800
       }
     },
     {
@@ -198,7 +198,8 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 8,
+        "objective": "minimize_loss"
       }
     },
     {
@@ -234,7 +235,8 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 8,
+        "objective": "minimize_curtail"
       }
     },
     {
@@ -271,7 +273,8 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 8,
+        "objective": "maximize_gen"
       }
     },
     {
@@ -308,7 +311,8 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 8,
+        "objective": "minimize_load"
       }
     },
     {
@@ -344,7 +348,8 @@
         "rho_sup": 0,
         "rho_vdn": 0,
         "rho_sdn": 1000.0,
-        "number_of_timesteps": 8
+        "number_of_timesteps": 8,
+        "objective": "maximize_gen"
       }
     },
     {

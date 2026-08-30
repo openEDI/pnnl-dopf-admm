@@ -20,6 +20,7 @@ from distopf_federate.plotting import (
     configure_publication_style,
     disconnect_areas,
     generate_graph,
+    generate_objective_scorecard,
     get_der_mapping,
     get_max_diff_timestep,
     load_recorder_data,
@@ -183,7 +184,7 @@ def main() -> None:
     logger.info("Processing metrics...")
     voltage_data = process_voltages(data, area_ids, area_buses, topology)
     flow_data = process_power_flows(data, area_ids, area_params, G, area_buses, der_map, slack_bus)
-    adequacy_df = process_generation_adequacy(topology, area_ids, area_buses)
+    adequacy_df = process_generation_adequacy(topology, area_ids, area_buses, area_params=area_params)
     convergence_data = process_convergence(data, area_ids)
 
     # 5. Plot and save outputs (only those matching the updated example)
@@ -192,13 +193,13 @@ def main() -> None:
 
     comparison_timestep = get_max_diff_timestep(data, topology)
 
-    fig_volt = plot_voltage_comparison(voltage_data, timestep=comparison_timestep)
+    fig_volt = plot_voltage_comparison(voltage_data, timestep=comparison_timestep, area_params=area_params)
     if fig_volt:
         fig_volt.savefig(output_dir / f"admm_{model}_voltage_comparison.png", dpi=300, bbox_inches="tight")
         fig_volt.savefig(output_dir / f"admm_{model}_voltage_comparison.eps", bbox_inches="tight")
         plt.close(fig_volt)
 
-    fig_flow = plot_power_flow_comparison(flow_data, timestep=comparison_timestep)
+    fig_flow = plot_power_flow_comparison(flow_data, timestep=comparison_timestep, area_params=area_params)
     if fig_flow:
         fig_flow.savefig(output_dir / f"admm_{model}_power_flow_comparison.png", dpi=300, bbox_inches="tight")
         fig_flow.savefig(output_dir / f"admm_{model}_power_flow_comparison.eps", bbox_inches="tight")
@@ -210,7 +211,7 @@ def main() -> None:
         fig_adeq.savefig(output_dir / f"admm_{model}_generation_adequacy.eps", bbox_inches="tight")
         plt.close(fig_adeq)
 
-    fig_conv = plot_algorithmic_convergence(convergence_data)
+    fig_conv = plot_algorithmic_convergence(convergence_data, area_params=area_params)
     if fig_conv:
         fig_conv.savefig(output_dir / f"admm_{model}_convergence.png", dpi=300, bbox_inches="tight")
         fig_conv.savefig(output_dir / f"admm_{model}_convergence.eps", bbox_inches="tight")
@@ -237,11 +238,32 @@ def main() -> None:
         slack_bus,
         coords_dir=topology_path.parent,
         scenario_path=scenario_path,
+        area_params=area_params,
     )
     if fig_partition:
         fig_partition.savefig(output_dir / f"admm_{model}_network_partition.png", dpi=300, bbox_inches="tight")
         fig_partition.savefig(output_dir / f"admm_{model}_network_partition.eps", bbox_inches="tight")
         plt.close(fig_partition)
+
+    # 7. Generate and save the objective performance scorecard table
+    fig_scorecard, scorecard_df = generate_objective_scorecard(
+        data=data,
+        topology=topology,
+        area_ids=area_ids,
+        area_params=area_params,
+        area_buses=area_buses,
+        flow_data=flow_data,
+        voltage_data=voltage_data,
+        timestep=comparison_timestep,
+    )
+    if fig_scorecard:
+        fig_scorecard.savefig(output_dir / f"admm_{model}_objective_scorecard.png", dpi=300, bbox_inches="tight")
+        fig_scorecard.savefig(output_dir / f"admm_{model}_objective_scorecard.eps", bbox_inches="tight")
+        plt.close(fig_scorecard)
+    if scorecard_df is not None and not scorecard_df.empty:
+        scorecard_df.to_csv(output_dir / f"admm_{model}_objective_scorecard.csv", index=False)
+        print("\n--- Objective Performance Scorecard ---")
+        print(scorecard_df.to_string(index=False))
 
     print(f"\nAll timestep-dependent plots were generated for timestep: {comparison_timestep}")
 

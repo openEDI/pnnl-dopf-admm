@@ -1,11 +1,21 @@
 """Pydantic configuration models for the distopf federate."""
 
 import json
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from oedisi.types.common import DefaultFileNames
 from pydantic import BaseModel, Field
+
+
+class ObjectiveType(str, Enum):
+    """Supported OPF objective types for distopf."""
+
+    MAXIMIZE_GEN = "maximize_gen"
+    MINIMIZE_LOSS = "minimize_loss"
+    MINIMIZE_CURTAIL = "minimize_curtail"
+    MINIMIZE_LOAD = "minimize_load"
 
 
 class StaticInputs(BaseModel):
@@ -23,10 +33,12 @@ class StaticInputs(BaseModel):
     rho_sdn: float = Field(1000.0, description="ADMM penalty parameter for active/reactive power flow discrepancy")
     max_itr: int = Field(100, description="Maximum number of ADMM iterations per step")
     relaxed: bool = Field(False, description="Boolean flag to enable relaxed model formulation")
-    control_type: str = Field("real", description="Control mode (e.g. 'real', 'reactive')")
     number_of_timesteps: int = Field(1, description="Total number of simulation timesteps")
     deltat: float = Field(3600.0, description="Co-simulation time step interval in seconds")
-    objective: str = Field("cp_obj_none", description="OPF objective function name")
+    objective: ObjectiveType = Field(
+        ObjectiveType.MAXIMIZE_GEN,
+        description="OPF objective function name: 'maximize_gen' (default), 'minimize_loss', 'minimize_curtail', or 'minimize_load'",
+    )
 
 
 class DynamicInputs(BaseModel):

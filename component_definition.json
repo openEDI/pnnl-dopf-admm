@@ -52,10 +52,6 @@
         },
         {
             "type": "",
-            "port_id": "control_type"
-        },
-        {
-            "type": "",
             "port_id": "number_of_timesteps"
         },
         {

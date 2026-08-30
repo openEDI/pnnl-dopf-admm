@@ -1,4 +1,17 @@
 {
+  "$defs": {
+    "ObjectiveType": {
+      "description": "Supported OPF objective types for distopf.",
+      "enum": [
+        "maximize_gen",
+        "minimize_loss",
+        "minimize_curtail",
+        "minimize_load"
+      ],
+      "title": "ObjectiveType",
+      "type": "string"
+    }
+  },
   "description": "Validated static configuration written by /configure and read by the federate.",
   "properties": {
     "name": {
@@ -74,12 +87,6 @@
       "title": "Relaxed",
       "type": "boolean"
     },
-    "control_type": {
-      "default": "real",
-      "description": "Control mode (e.g. 'real', 'reactive')",
-      "title": "Control Type",
-      "type": "string"
-    },
     "number_of_timesteps": {
       "default": 1,
       "description": "Total number of simulation timesteps",
@@ -93,10 +100,9 @@
       "type": "number"
     },
     "objective": {
-      "default": "cp_obj_none",
-      "description": "OPF objective function name",
-      "title": "Objective",
-      "type": "string"
+      "$ref": "#/$defs/ObjectiveType",
+      "default": "maximize_gen",
+      "description": "OPF objective function name: 'maximize_gen' (default), 'minimize_loss', 'minimize_curtail', or 'minimize_load'"
     }
   },
   "required": [

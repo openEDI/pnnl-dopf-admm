@@ -117,6 +117,28 @@ AREA_COLORS = [
     "#17becf",  # Area 9
 ]
 
+OBJECTIVE_SHORT_NAMES: dict[str, str] = {
+    "maximize_gen": "Gen Max",
+    "minimize_loss": "Loss Min",
+    "minimize_curtail": "Curtail Min",
+    "minimize_load": "Load Min",
+}
+
+
+def format_area_label(
+    aid: int,
+    area_params: dict[int, dict[str, Any]] | None = None,
+    multiline: bool = False,
+) -> str:
+    """Format area label with compact objective name, e.g. 'Area 0 (Loss Min)' or 'Area 0\n(Loss Min)'."""
+    if not area_params or aid not in area_params:
+        return f"Area {aid}"
+    obj = str(area_params[aid].get("objective", ""))
+    short = OBJECTIVE_SHORT_NAMES.get(obj, obj)
+    if not short:
+        return f"Area {aid}"
+    return f"Area {aid}\n({short})" if multiline else f"Area {aid} ({short})"
+
 
 def format_time_val(time_val: Any) -> str:
     """Format time value to HH:MM format."""
@@ -234,7 +256,7 @@ def load_scenario_parameters(
         comp_name = comp.get("name", "")
         comp_type = comp.get("type", "")
         if (
-            comp_type == "PnnlDopfAdmmComponent"
+            comp_type in ("DOPFADMMComponent", "PnnlDopfAdmmComponent")
             or comp_name.startswith("pnnl_dopf_admm_")
             or re.match(r"^area\d+$", comp_name)
         ):
@@ -247,6 +269,7 @@ def load_scenario_parameters(
                     "source_bus": params.get("source_bus"),
                     "source_line": params.get("source_line"),
                     "switches": params.get("switches", []),
+                    "objective": params.get("objective", "maximize_gen"),
                 }
     area_ids.sort()
     return area_ids, area_params
@@ -402,6 +425,25 @@ def load_recorder_data(data_dir: Path, scenario: Path | dict) -> dict[str, pd.Da
                 logger.info(f"Loaded {filename} for {key} with shape {data[key].shape}")
             else:
                 logger.warning(f"Required recorder file not found: {filename} (expected for {key})")
+
+    # Align control feeder records to reference timestamps (selecting post-control state for each step)
+    if "reference_v_real" in data and "time" in data["reference_v_real"].columns:
+        ref_times = data["reference_v_real"]["time"].tolist()
+        ctrl_keys = ["feeder_v_real", "feeder_v_imag", "feeder_p_real", "feeder_p_imag"]
+        for ckey in ctrl_keys:
+            if ckey in data and "time" in data[ckey].columns:
+                cdf = data[ckey]
+                aligned_rows = []
+                for r_t in ref_times:
+                    prefix = str(r_t)[:13]
+                    matches = cdf[cdf["time"].astype(str).str.startswith(prefix)]
+                    if len(matches) > 0:
+                        row = matches.iloc[-1].to_dict()
+                        row["time"] = r_t
+                        aligned_rows.append(row)
+                if len(aligned_rows) == len(ref_times):
+                    data[ckey] = pd.DataFrame(aligned_rows)
+                    logger.info(f"Aligned {ckey} with post-control timesteps (shape {data[ckey].shape})")
 
     return data
 
@@ -760,6 +802,7 @@ def process_generation_adequacy(
     topology: Topology,
     area_ids: list[int],
     area_buses: list[list[str]],
+    area_params: dict[int, dict[str, Any]] | None = None,
 ) -> pd.DataFrame:
     """Calculate the aggregated rated generation capacity and rated load for each area from grid network models."""
     # Create area map: bus_name -> area_id
@@ -788,16 +831,17 @@ def process_generation_adequacy(
 
     records = []
     for aid in area_ids:
+        area_label = format_area_label(aid, area_params, multiline=True)
         records.append(
             {
-                "Area": f"Area {aid}",
+                "Area": area_label,
                 "Power Capacity (kW)": rated_gen[aid],
                 "Metric": "Rated Generation",
             }
         )
         records.append(
             {
-                "Area": f"Area {aid}",
+                "Area": area_label,
                 "Power Capacity (kW)": rated_load[aid],
                 "Metric": "Rated Load",
             }
@@ -824,60 +868,43 @@ def get_max_diff_timestep(data: dict[str, pd.DataFrame], topology: Topology) -> 
     time_col = "time" if "time" in c_real.columns else c_real.columns[0]
     c_times = c_real[time_col].unique()
     r_times = r_real[time_col].unique()
-    common_times = np.intersect1d(c_times, r_times)
+    common_times = [t for t in c_times if t in r_times]
+    if not common_times:
+        return c_times[-1] if len(c_times) > 0 else None
 
-    if len(common_times) == 0:
-        if len(c_times) > 0:
-            return c_times[-1]
-        return None
-
-    c_r_df = c_real[c_real[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
-    c_i_df = c_imag[c_imag[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
-    r_r_df = r_real[r_real[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
-    r_i_df = r_imag[r_imag[time_col].isin(common_times)].sort_values(by=time_col).set_index(time_col)
-
-    common_cols = [c for c in c_r_df.columns if c in r_r_df.columns]
-    if not common_cols:
+    # Common columns excluding time
+    cols = [c for c in c_real.columns if c != time_col and c in r_real.columns]
+    if not cols:
         return common_times[-1]
 
-    try:
-        base_volts_info = topology.base_voltage_magnitudes
-        ids = base_volts_info.ids
-        values = base_volts_info.values
-        base_voltages = dict(zip(ids, values))
-    except Exception:
-        base_voltages = {}
-
+    # Calculate L1 voltage magnitude difference across all nodes for each common timestep
     max_diff = -1.0
-    best_t = common_times[-1]
+    best_time = common_times[-1]
 
     for t in common_times:
-        diffs = []
-        for col in common_cols:
-            v_r_ref = r_r_df.loc[t, col]
-            v_i_ref = r_i_df.loc[t, col]
-            v_ref_mag = (v_r_ref**2 + v_i_ref**2) ** 0.5
+        cr = c_real[c_real[time_col] == t][cols].values
+        ci = c_imag[c_imag[time_col] == t][cols].values
+        rr = r_real[r_real[time_col] == t][cols].values
+        ri = r_imag[r_imag[time_col] == t][cols].values
 
-            v_r_ctrl = c_r_df.loc[t, col]
-            v_i_ctrl = c_i_df.loc[t, col]
-            v_ctrl_mag = (v_r_ctrl**2 + v_i_ctrl**2) ** 0.5
+        if cr.size == 0 or rr.size == 0:
+            continue
 
-            base_v = base_voltages.get(col, 1.0)
-            if base_v <= 0:
-                base_v = 1.0
-            diffs.append(abs(v_ref_mag - v_ctrl_mag) / base_v)
-        mean_diff = float(np.mean(diffs))
-        if mean_diff > max_diff:
-            max_diff = mean_diff
-            best_t = t
+        c_mag = np.sqrt(cr**2 + ci**2)
+        r_mag = np.sqrt(rr**2 + ri**2)
+        diff = np.abs(c_mag - r_mag).sum()
 
-    logger.info(f"Selected consistent comparison timestep: {best_t} (mean voltage diff = {max_diff:.5f} p.u.)")
-    return best_t
+        if diff > max_diff:
+            max_diff = diff
+            best_time = t
+
+    return best_time
 
 
 def plot_voltage_comparison(
     voltage_data: dict[int, pd.DataFrame],
     timestep: Any = None,
+    area_params: dict[int, dict[str, Any]] | None = None,
     figsize: tuple[float, float] | None = None,
     target: str = "paper",
 ) -> plt.Figure | None:
@@ -892,13 +919,14 @@ def plot_voltage_comparison(
             latest_time = df["time"].max()
             df_latest = df[df["time"] == latest_time]
 
+        area_label = format_area_label(aid, area_params, multiline=True)
         for _, row in df_latest.iterrows():
             if row.get("v_reference") is not None:
-                records.append({"Voltage (p.u.)": row["v_reference"], "Area": f"Area {aid}", "Case": "Reference"})
+                records.append({"Voltage (p.u.)": row["v_reference"], "Area": area_label, "Case": "Reference"})
             records.append(
                 {
                     "Voltage (p.u.)": row["v_control"],
-                    "Area": f"Area {aid}",
+                    "Area": area_label,
                     "Case": "Control",
                 }
             )
@@ -939,13 +967,15 @@ def plot_voltage_comparison(
     limit_line = ax.axhline(1.05, color="r", linestyle="--", label="Voltage Limits")
     ax.axhline(0.95, color="r", linestyle="--")
 
-    ax.set_xlabel("Control Area")
     ax.set_ylabel("Voltage Magnitude (p.u.)")
+    ax.set_xlabel("Control Area")
+    if timestep is not None:
+        ax.set_title(f"Feeder Voltage Distributions ({format_time_val(timestep)})")
 
     # Custom legend
     legend_elements = [
-        mpatches.Patch(color="#b0bec5", label="Reference Feeder"),
-        mpatches.Patch(color="#7f7f7f", label="Control Feeder (Colored by Area)"),
+        mpatches.Patch(color="#b0bec5", label="Reference"),
+        mpatches.Patch(color="#7f7f7f", label="Control (Colored by Area)"),
         limit_line,
     ]
     if target == "notebook":
@@ -958,13 +988,14 @@ def plot_voltage_comparison(
         )
     else:
         ax.legend(handles=legend_elements, loc="best")
-
+    ax.tick_params(axis="x", labelsize=6.5)
     return fig
 
 
 def plot_power_flow_comparison(
     flow_data: dict[str, Any],
     timestep: Any = None,
+    area_params: dict[int, dict[str, Any]] | None = None,
     figsize: tuple[float, float] | None = None,
     target: str = "paper",
 ) -> plt.Figure | None:
@@ -984,20 +1015,21 @@ def plot_power_flow_comparison(
             latest_time = df["time"].max()
             df_latest = df[df["time"] == latest_time]
 
+        area_label = format_area_label(aid, area_params, multiline=True)
         for _, row in df_latest.iterrows():
             p_control = row.get("p_control_net_import", 0.0)
             p_reference = row.get("p_reference_net_import", 0.0)
 
             records.append(
                 {
-                    "Area": f"Area {aid}",
+                    "Area": area_label,
                     "Real Power (kW)": p_control,
                     "Case": "Control",
                 }
             )
             records.append(
                 {
-                    "Area": f"Area {aid}",
+                    "Area": area_label,
                     "Real Power (kW)": p_reference,
                     "Case": "Reference",
                 }
@@ -1053,6 +1085,7 @@ def plot_power_flow_comparison(
         )
     else:
         ax.legend(handles=legend_elements, loc="best")
+    ax.tick_params(axis="x", labelsize=6.5)
     plt.xticks(rotation=0)
     return fig
 
@@ -1112,11 +1145,13 @@ def plot_generation_adequacy(
         )
     else:
         ax.legend(handles=legend_elements, loc="best")
+    ax.tick_params(axis="x", labelsize=6.5)
     return fig
 
 
 def plot_algorithmic_convergence(
     convergence_data: dict[int, pd.DataFrame],
+    area_params: dict[int, dict[str, Any]] | None = None,
     figsize: tuple[float, float] | None = None,
     target: str = "paper",
 ) -> plt.Figure | None:
@@ -1137,11 +1172,12 @@ def plot_algorithmic_convergence(
             continue
         idx = df.groupby("time")["admm_iteration"].idxmax()
         df_final = df.loc[idx]
+        area_label = format_area_label(aid, area_params)
         for _, row in df_final.iterrows():
             records.append(
                 {
                     "time": format_time_val(row["time"]),
-                    "Area": f"Area {aid}",
+                    "Area": area_label,
                     "Optimality Gap": abs(row["optimality_gap"]),
                     "Feasibility Gap": abs(row["feasibility_gap"]),
                 }
@@ -1157,17 +1193,18 @@ def plot_algorithmic_convergence(
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
     colors = AREA_COLORS
 
-    areas = sorted(df_plot["Area"].unique(), key=lambda x: int(x.split()[-1]))
+    def _extract_aid(area_str: str) -> int:
+        m = re.search(r"\d+", area_str)
+        return int(m.group()) if m else 0
+
+    areas = sorted(df_plot["Area"].unique(), key=_extract_aid)
 
     legend_handles = []
     legend_labels = []
 
     for area_name in areas:
         df_area = df_plot[df_plot["Area"] == area_name]
-        try:
-            aid = int(area_name.split()[-1])
-        except (ValueError, IndexError):
-            aid = 0
+        aid = _extract_aid(area_name)
         color = colors[aid % len(colors)]
 
         # Plot Optimality Gap (Top)
@@ -1176,49 +1213,44 @@ def plot_algorithmic_convergence(
             df_area["Optimality Gap"],
             "o-",
             color=color,
-            linewidth=1.0,
-        )
+            markersize=3,
+            label=f"{area_name} Opt Gap",
+        )[0]
+        legend_handles.append(line_opt)
+        legend_labels.append(area_name)
 
         # Plot Feasibility Gap (Bottom)
         ax2.semilogy(
             df_area["time"],
             df_area["Feasibility Gap"],
-            "s-",
+            "s--",
             color=color,
-            linewidth=1.0,
+            markersize=3,
+            label=f"{area_name} Feas Gap",
         )
 
-        legend_handles.append(line_opt[0])
-        legend_labels.append(f"Area {aid}")
-
-    # Tolerance lines
+    # Add standard convergence tolerance line (1e-3)
     tol_line = ax1.axhline(1e-3, color="gray", linestyle=":")
     ax2.axhline(1e-3, color="gray", linestyle=":")
-
     legend_handles.append(tol_line)
-    legend_labels.append("Tolerance")
+    legend_labels.append("Tolerance (1e-3)")
 
     ax1.set_ylabel("Optimality Gap")
     ax2.set_ylabel("Feasibility Gap")
-    ax2.set_xlabel("Simulation Time (HH:MM)")
-
-    for ax in [ax1, ax2]:
-        ax.grid(True, which="both", linestyle=":")
-
-    plt.setp(ax2.get_xticklabels(), rotation=15, ha="right")
+    ax2.set_xlabel("Time")
 
     if target == "notebook":
         ax1.legend(
-            handles=legend_handles,
-            labels=legend_labels,
+            legend_handles,
+            legend_labels,
             bbox_to_anchor=(1.02, 1),
             loc="upper left",
             borderaxespad=0.0,
             framealpha=0.95,
         )
     else:
-        ax1.legend(handles=legend_handles, labels=legend_labels, loc="best")
-    fig.subplots_adjust(hspace=0.25)
+        ax1.legend(legend_handles, legend_labels, loc="best", ncol=2)
+
     return fig
 
 
@@ -1226,44 +1258,45 @@ def load_coordinates(
     coords_dir: str | Path | None = None,
     scenario_path: str | Path | None = None,
 ) -> dict[str, tuple[float, float]]:
-    """Load OpenDSS bus coordinates matching the scenario feeder model."""
-    candidate_paths: list[Path] = []
-
+    """Search for bus_coords.csv in standard locations or scenario folder."""
+    search_dirs = []
+    if coords_dir:
+        search_dirs.append(Path(coords_dir))
     if scenario_path:
-        scen_path = Path(scenario_path).resolve()
-        scen_dir = scen_path.parent
+        search_dirs.append(Path(scenario_path).parent)
 
-        # Extract model folder from scenario stem (e.g., pnnl_dopf_admm_ieee123_5 -> ieee123)
-        stem = scen_path.stem.replace("pnnl_dopf_admm_", "")
-        model_name = stem.rsplit("_", 1)[0] if "_" in stem else stem
+    # Search known dataset directories
+    known_data_dirs = [
+        Path("tests/test_data"),
+        Path("data"),
+        Path("../tests/test_data"),
+        Path("../../data"),
+    ]
+    search_dirs.extend(known_data_dirs)
 
-        model_dir = scen_dir / model_name
-        for fn in ["Buscoords.dss", "Buscoords.dat", "buscoords.dss", "buscoords.dat"]:
-            candidate_paths.append(model_dir / fn)
-
-        # Also inspect component parameters in scenario JSON for opendss_location / profile_location
+    # Also inspect component parameters in scenario JSON for opendss_location / profile_location
+    if scenario_path and Path(scenario_path).exists():
         try:
-            with open(scen_path, encoding="utf-8") as f:
-                scen_dict = json.load(f)
-            for comp in scen_dict.get("components", []):
-                params = comp.get("parameters", {})
+            with open(scenario_path, encoding="utf-8") as f:
+                scen = json.load(f)
+            for comp in scen.get("components", []):
                 for k in ["opendss_location", "profile_location"]:
-                    val = params.get(k, "")
+                    val = comp.get("parameters", {}).get(k)
                     if val:
-                        folder = val.split("/")[0].replace("gadal_", "")
-                        for fn in ["Buscoords.dss", "Buscoords.dat"]:
-                            candidate_paths.append(scen_dir / folder / fn)
+                        search_dirs.append(Path(val))
         except Exception:
             pass
 
-    if coords_dir:
-        c_dir = Path(coords_dir).resolve()
-        for fn in ["Buscoords.dss", "Buscoords.dat", "buscoords.dss", "buscoords.dat"]:
-            candidate_paths.append(c_dir / fn)
-
-    for f_path in candidate_paths:
-        if f_path.exists():
-            coords: dict[str, tuple[float, float]] = {}
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        # Search for bus_coords.csv
+        matches = list(d.glob("**/bus_coords.csv"))
+        if not matches:
+            matches = list(d.glob("**/BusCoords.dat")) + list(d.glob("**/Buscoords.dat"))
+        if matches:
+            f_path = matches[0]
+            coords = {}
             with open(f_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -1292,6 +1325,7 @@ def plot_network_partition(
     slack_bus: str,
     coords_dir: str | Path | None = None,
     scenario_path: str | Path | None = None,
+    area_params: dict[int, dict[str, Any]] | None = None,
     figsize: tuple[float, float] | None = None,
     target: str = "paper",
 ) -> plt.Figure:
@@ -1358,7 +1392,8 @@ def plot_network_partition(
     legend_elements = []
     for idx, area in enumerate(areas_clean):
         color = colors[idx % len(colors)]
-        legend_elements.append(mpatches.Patch(color=color, label=f"Area {idx}"))
+        label = format_area_label(idx, area_params)
+        legend_elements.append(mpatches.Patch(color=color, label=label))
     legend_elements.append(
         Line2D(
             [0],
@@ -1658,3 +1693,145 @@ def plot_power_scatter_at_timestep(
         ax2.legend(loc="best")
     fig.subplots_adjust(wspace=0.35)
     return fig
+
+
+def generate_objective_scorecard(
+    data: dict[str, pd.DataFrame],
+    topology: Topology,
+    area_ids: list[int],
+    area_params: dict[int, dict[str, Any]],
+    area_buses: list[list[str]],
+    flow_data: dict[str, Any],
+    voltage_data: dict[int, pd.DataFrame],
+    timestep: Any = None,
+    figsize: tuple[float, float] | None = None,
+    target: str = "paper",
+) -> tuple[plt.Figure | None, pd.DataFrame]:
+    """Generate an objective performance scorecard table comparing Control vs Reference metrics per area."""
+    if not area_ids:
+        return None, pd.DataFrame()
+
+    boundary_flows = flow_data.get("boundary_flows", {})
+    bus_area_map = {}
+    for aid in area_ids:
+        if aid < len(area_buses):
+            for bus in area_buses[aid]:
+                bus_area_map[bus] = aid
+
+    # Map rated DER generation per area from topology
+    rated_gen: dict[int, float] = {aid: 0.0 for aid in area_ids}
+    real_inj = topology.injections.power_real
+    for bus_phase, eq_id, val in zip(real_inj.ids, real_inj.equipment_ids, real_inj.values):
+        bus = bus_phase.split(".")[0]
+        aid = bus_area_map.get(bus)
+        if aid is not None and "pvsystem" in eq_id.lower():
+            rated_gen[aid] += float(val)
+
+    # Actual DER generation at timestep if available from der_comparisons
+    time_col = "time"
+    der_comparisons = flow_data.get("der_comparisons", {})
+    der_actual_gen: dict[int, float] = {aid: 0.0 for aid in area_ids}
+    for aid in area_ids:
+        if aid in der_comparisons and not der_comparisons[aid].empty:
+            df_der = der_comparisons[aid]
+            t_col = time_col if time_col in df_der.columns else df_der.columns[0]
+            if timestep is not None and timestep in df_der[t_col].values:
+                der_sub = df_der[df_der[t_col] == timestep]
+            else:
+                der_sub = df_der[df_der[t_col] == df_der[t_col].max()]
+            der_actual_gen[aid] = float(der_sub["p_admm_ctrl"].sum())
+        else:
+            der_actual_gen[aid] = rated_gen[aid]
+
+    rows = []
+    for aid in area_ids:
+        label = format_area_label(aid, area_params)
+        obj_name = area_params.get(aid, {}).get("objective", "maximize_gen")
+
+        # Boundary flows
+        p_ctrl = 0.0
+        p_ref = 0.0
+        if aid in boundary_flows and not boundary_flows[aid].empty:
+            df_b = boundary_flows[aid]
+            t_col = time_col if time_col in df_b.columns else df_b.columns[0]
+            if timestep is not None and timestep in df_b[t_col].values:
+                b_row = df_b[df_b[t_col] == timestep].iloc[0]
+            else:
+                b_row = df_b.iloc[-1]
+            p_ctrl = float(b_row.get("p_control_net_import", 0.0))
+            p_ref = float(b_row.get("p_reference_net_import", 0.0))
+        delta_p = p_ctrl - p_ref
+
+        # Voltage stats
+        v_ctrl_mean = 1.0
+        v_ref_mean = 1.0
+        v_ctrl_dev = 0.0
+        v_ref_dev = 0.0
+        if aid in voltage_data and not voltage_data[aid].empty:
+            df_v = voltage_data[aid]
+            t_col = time_col if time_col in df_v.columns else df_v.columns[0]
+            if timestep is not None and timestep in df_v[t_col].values:
+                v_sub = df_v[df_v[t_col] == timestep]
+            else:
+                v_sub = df_v[df_v[t_col] == df_v[t_col].max()]
+            if not v_sub.empty:
+                v_ctrl_mean = float(v_sub["v_control"].mean())
+                v_ctrl_dev = float((v_sub["v_control"] - 1.0).abs().mean())
+                if "v_reference" in v_sub and v_sub["v_reference"].notna().any():
+                    v_ref_mean = float(v_sub["v_reference"].mean())
+                    v_ref_dev = float((v_sub["v_reference"] - 1.0).abs().mean())
+
+        r_gen = rated_gen[aid]
+        c_gen = der_actual_gen[aid] if der_actual_gen[aid] > 0 else r_gen
+        curtail_pct = max(0.0, (1.0 - c_gen / r_gen) * 100.0) if r_gen > 0 else 0.0
+
+        rows.append(
+            {
+                "Area": label,
+                "Objective": obj_name,
+                "Net Import (kW)\nRef / Ctrl (Δ)": f"{p_ref:.1f} / {p_ctrl:.1f} ({delta_p:+.1f})",
+                "DER Gen (kW)\nRated / Ctrl": f"{r_gen:.1f} / {c_gen:.1f}",
+                "Curtailment\n(%)": f"{curtail_pct:.1f}%",
+                "Mean Voltage\nRef / Ctrl (p.u.)": f"{v_ref_mean:.3f} / {v_ctrl_mean:.3f}",
+                "Mean Dev |V-1|\nRef / Ctrl (p.u.)": f"{v_ref_dev:.3f} / {v_ctrl_dev:.3f}",
+            }
+        )
+
+    scorecard_df = pd.DataFrame(rows)
+
+    if figsize is None:
+        if target == "notebook":
+            figsize = (9.5, 3.2)
+        else:
+            figsize = get_publication_figsize("double", 0.42)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.axis("off")
+
+    col_labels = list(scorecard_df.columns)
+    cell_text = scorecard_df.values.tolist()
+    col_widths = [0.15, 0.16, 0.21, 0.14, 0.10, 0.12, 0.12]
+
+    table = ax.table(
+        cellText=cell_text,
+        colLabels=col_labels,
+        colWidths=col_widths,
+        cellLoc="center",
+        loc="center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(6.5)
+    table.scale(1.0, 1.7)
+
+    # Style header and alternating row colors
+    for (r, c), cell in table.get_celld().items():
+        if r == 0:
+            cell.set_facecolor("#37474f")
+            cell.set_text_props(color="white", weight="bold")
+        elif r % 2 == 0:
+            cell.set_facecolor("#f8f9fa")
+        else:
+            cell.set_facecolor("#ffffff")
+
+    return fig, scorecard_df
+

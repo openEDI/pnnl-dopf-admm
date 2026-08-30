@@ -17,9 +17,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
+import cvxpy as cp
 import distopf as opf
 import helics as h
+import numpy as np
 from distopf.distributed.spatial.decompose import decompose
 from oedisi.types.common import BrokerConfig, DefaultFileNames
 from oedisi.types.data_types import (
@@ -50,19 +53,41 @@ from distopf_federate.importer import (
     topology_to_case,
     update_case_from_measurements,
 )
-from distopf_federate.schemas import ComponentDefinition, StaticInputs
+from distopf_federate.schemas import ComponentDefinition, ObjectiveType, StaticInputs
 
 logger = logging.getLogger(__name__)
 # Libraries should not configure the root logger; callers decide handler/level.
 logger.addHandler(logging.NullHandler())
 
-OBJECTIVES: dict[str, Callable] = {
-    "cp_obj_loss": opf.cp_obj_loss,
-    "cp_obj_curtail": opf.cp_obj_curtail,
-    "cp_obj_curtail_lp": opf.cp_obj_curtail_lp,
-    "cp_obj_target_p_total": opf.cp_obj_target_p_total,
-    "cp_obj_target_q_total": opf.cp_obj_target_q_total,
-    "cp_obj_none": opf.cp_obj_none,
+
+def cp_obj_maximize_gen(model: opf.LinDistModel, xk: cp.Variable, **kwargs: Any) -> cp.Expression:
+    """Objective function to maximize DER active power generation."""
+    all_pg_idx = np.array([], dtype=int)
+    for a in "abc":
+        if not model.phase_exists(a):
+            continue
+        all_pg_idx = np.r_[all_pg_idx, model.pg_map[a].to_numpy()]
+    all_pg_idx = all_pg_idx.astype(int)
+    if len(all_pg_idx) == 0:
+        return cp.Constant(0)
+    return -cp.sum(xk[all_pg_idx])  # type: ignore[no-any-return,attr-defined]
+
+
+def cp_obj_minimize_load(model: opf.LinDistModel, xk: cp.Variable, **kwargs: Any) -> cp.Expression:
+    """Objective function to minimize active power drawn from the substation / swing bus."""
+    f = cp.Constant(0)
+    for ph in "abc":
+        if model.phase_exists(ph):
+            branch_idx = model.idx("pij", model.swing_bus, ph)
+            f += cp.sum(xk[branch_idx])  # type: ignore[attr-defined]
+    return f
+
+
+OBJECTIVES: dict[str, Callable[..., Any]] = {
+    ObjectiveType.MAXIMIZE_GEN.value: cp_obj_maximize_gen,
+    ObjectiveType.MINIMIZE_LOSS.value: opf.cp_obj_loss,
+    ObjectiveType.MINIMIZE_CURTAIL.value: opf.cp_obj_curtail,
+    ObjectiveType.MINIMIZE_LOAD.value: cp_obj_minimize_load,
 }
 
 
@@ -192,8 +217,18 @@ class DistopfFederate:
             self.fed.register_publication(dyn_out.pub_q, h.HELICS_DATA_TYPE_STRING, "") if dyn_out.pub_q else None
         )
 
-    def _get_objective_fn(self) -> Callable | None:
-        return OBJECTIVES.get(self.static.objective)
+    def _get_objective_fn(self) -> Callable[..., Any]:
+        obj_key = (
+            self.static.objective.value
+            if hasattr(self.static.objective, "value")
+            else str(self.static.objective)
+        )
+        if obj_key in OBJECTIVES:
+            return OBJECTIVES[obj_key]
+        raise ValueError(
+            f"Unsupported objective '{self.static.objective}'. "
+            f"Supported objectives: {list(OBJECTIVES.keys())}"
+        )
 
     def init_area(self) -> None:
         """Parse topology subscription, build full Case, decompose to local sub_case."""
@@ -352,6 +387,14 @@ class DistopfFederate:
             self.sub_case = full_case
         else:
             self.sub_case = area_cases[self.area_name]
+            # Initialize dummy boundary PQ loads to 0.0 to guarantee feasibility before first S_up update
+            dummy_mask = self.sub_case.bus_data["name"].str.startswith("area_")
+            load_cols = [
+                col
+                for col in ["pl_a", "pl_b", "pl_c", "ql_a", "ql_b", "ql_c"]
+                if col in self.sub_case.bus_data.columns
+            ]
+            self.sub_case.bus_data.loc[dummy_mask, load_cols] = 0.0
             logger.debug(
                 "Sub-case built for area '%s': %d buses, %d branches",
                 self.area_name,
@@ -481,9 +524,14 @@ class DistopfFederate:
         _safe_publish(self.pub_solver_stats, stats.json())
 
     def first_pub(self, t: float) -> None:
-        """Publish empty initial values at the start of each timestep's iteration loop."""
+        """Publish empty initial boundary values at the start of each timestep's iteration loop."""
         self._prev_s_up_vals = []
-        self._publish_empty(int(t))
+        empty_v = VoltagesMagnitude(ids=[], values=[], time=int(t))
+        empty_p = PowersReal(ids=[], equipment_ids=[], values=[], time=int(t))
+        empty_q = PowersImaginary(ids=[], equipment_ids=[], values=[], time=int(t))
+        _safe_publish(self.pub_v, empty_v.json())
+        _safe_publish(self.pub_p, empty_p.json())
+        _safe_publish(self.pub_q, empty_q.json())
 
     def itr_pub(self) -> None:
         """Read subscriptions, apply boundary conditions, solve sub-area OPF, publish.
@@ -537,10 +585,7 @@ class DistopfFederate:
         tic = _time.perf_counter()
         result = None
         try:
-            if objective_fn is not None:
-                result = sub_case.run_opf(objective_fn)
-            else:
-                result = sub_case.run_pf()
+            result = sub_case.run_opf(objective=objective_fn, wrapper="matrix")
         except Exception:
             logger.exception("OPF solve failed for area '%s' at t=%d", self.area_name, self._current_t)
 
@@ -583,11 +628,17 @@ class DistopfFederate:
             self._current_t = 0
             logger.debug("Starting time/iteration loop")
 
+            total_duration = (
+                self.static.number_of_timesteps * self.static.deltat
+                if self.static.number_of_timesteps > 0
+                else h.HELICS_TIME_MAXTIME
+            )
+
             while True:
-                if self.static.number_of_timesteps > 0 and granted_time >= self.static.number_of_timesteps:
+                if self.static.number_of_timesteps > 0 and granted_time >= total_duration:
                     logger.info(
                         "Reached end time %d. Exiting loop.",
-                        self.static.number_of_timesteps,
+                        total_duration,
                     )
                     break
 

@@ -375,10 +375,9 @@ def topology_to_case(
         _, phases = base_voltages.get(bus_name, [0.0, [0, 0, 0]])
         phases_str = _phases_to_str(phases) or "abc"
 
-        total_pv_pu = pv[:, 0].sum() / S_BASE
-        # Use MIN_GEN_SA_PU as a floor to keep the OPF well-conditioned even
-        # when measured output is near zero.
-        sa_max_pu = max(total_pv_pu, MIN_GEN_SA_PU)
+        sa_max_a = pv[0, 0] / S_BASE if pv[0, 0] > 0 else 0.0
+        sa_max_b = pv[1, 0] / S_BASE if pv[1, 0] > 0 else 0.0
+        sa_max_c = pv[2, 0] / S_BASE if pv[2, 0] > 0 else 0.0
 
         gen_rows.append(
             {
@@ -390,15 +389,15 @@ def topology_to_case(
                 "qa": pv[0, 1] / S_BASE,
                 "qb": pv[1, 1] / S_BASE,
                 "qc": pv[2, 1] / S_BASE,
-                "sa_max": sa_max_pu,
-                "sb_max": sa_max_pu,
-                "sc_max": sa_max_pu,
-                "qa_max": sa_max_pu,
-                "qb_max": sa_max_pu,
-                "qc_max": sa_max_pu,
-                "qa_min": -sa_max_pu,
-                "qb_min": -sa_max_pu,
-                "qc_min": -sa_max_pu,
+                "sa_max": sa_max_a,
+                "sb_max": sa_max_b,
+                "sc_max": sa_max_c,
+                "qa_max": sa_max_a,
+                "qb_max": sa_max_b,
+                "qc_max": sa_max_c,
+                "qa_min": -sa_max_a,
+                "qb_min": -sa_max_b,
+                "qc_min": -sa_max_c,
                 "phases": phases_str,
                 "control_variable": opf.CONTROL_PQ,
                 "gen_shape": "",  # empty → no schedule multiplier
@@ -475,8 +474,9 @@ def update_case_from_measurements(
             if not np.any(mask):
                 continue
             pv = data["pv"]
-            total_p_pu = pv[:, 0].sum() / S_BASE
-            sa_max_pu = max(total_p_pu, 0.0)
+            sa_max_a = max(pv[0, 0] / S_BASE, 0.0)
+            sa_max_b = max(pv[1, 0] / S_BASE, 0.0)
+            sa_max_c = max(pv[2, 0] / S_BASE, 0.0)
             if "p_a" in case.gen_data.columns:
                 case.gen_data.loc[mask, "p_a"] = pv[0, 0] / S_BASE
                 case.gen_data.loc[mask, "p_b"] = pv[1, 0] / S_BASE
@@ -484,9 +484,15 @@ def update_case_from_measurements(
                 case.gen_data.loc[mask, "q_a"] = pv[0, 1] / S_BASE
                 case.gen_data.loc[mask, "q_b"] = pv[1, 1] / S_BASE
                 case.gen_data.loc[mask, "q_c"] = pv[2, 1] / S_BASE
-                case.gen_data.loc[mask, ["s_a_max", "s_b_max", "s_c_max"]] = sa_max_pu
-                case.gen_data.loc[mask, ["q_a_max", "q_b_max", "q_c_max"]] = sa_max_pu
-                case.gen_data.loc[mask, ["q_a_min", "q_b_min", "q_c_min"]] = -sa_max_pu
+                case.gen_data.loc[mask, "s_a_max"] = sa_max_a
+                case.gen_data.loc[mask, "s_b_max"] = sa_max_b
+                case.gen_data.loc[mask, "s_c_max"] = sa_max_c
+                case.gen_data.loc[mask, "q_a_max"] = sa_max_a
+                case.gen_data.loc[mask, "q_b_max"] = sa_max_b
+                case.gen_data.loc[mask, "q_c_max"] = sa_max_c
+                case.gen_data.loc[mask, "q_a_min"] = -sa_max_a
+                case.gen_data.loc[mask, "q_b_min"] = -sa_max_b
+                case.gen_data.loc[mask, "q_c_min"] = -sa_max_c
             else:
                 case.gen_data.loc[mask, "pa"] = pv[0, 0] / S_BASE
                 case.gen_data.loc[mask, "pb"] = pv[1, 0] / S_BASE
@@ -494,9 +500,15 @@ def update_case_from_measurements(
                 case.gen_data.loc[mask, "qa"] = pv[0, 1] / S_BASE
                 case.gen_data.loc[mask, "qb"] = pv[1, 1] / S_BASE
                 case.gen_data.loc[mask, "qc"] = pv[2, 1] / S_BASE
-                case.gen_data.loc[mask, ["sa_max", "sb_max", "sc_max"]] = sa_max_pu
-                case.gen_data.loc[mask, ["qa_max", "qb_max", "qc_max"]] = sa_max_pu
-                case.gen_data.loc[mask, ["qa_min", "qb_min", "qc_min"]] = -sa_max_pu
+                case.gen_data.loc[mask, "sa_max"] = sa_max_a
+                case.gen_data.loc[mask, "sb_max"] = sa_max_b
+                case.gen_data.loc[mask, "sc_max"] = sa_max_c
+                case.gen_data.loc[mask, "qa_max"] = sa_max_a
+                case.gen_data.loc[mask, "qb_max"] = sa_max_b
+                case.gen_data.loc[mask, "qc_max"] = sa_max_c
+                case.gen_data.loc[mask, "qa_min"] = -sa_max_a
+                case.gen_data.loc[mask, "qb_min"] = -sa_max_b
+                case.gen_data.loc[mask, "qc_min"] = -sa_max_c
 
     # Update swing bus voltage from live measurements
     if voltages_mag is not None:
