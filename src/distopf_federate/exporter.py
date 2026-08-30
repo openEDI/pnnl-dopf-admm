@@ -369,10 +369,12 @@ def result_to_commands(
     result,
     gen_tags: dict,
     time: int,
-) -> list:
-    """Convert OPF generator setpoints to a list of (equipment_id, P_W, Q_VAR) tuples.
+) -> list[dict[str, Any]]:
+    """Convert OPF generator setpoints to a list of Command dicts matching CommandList schema.
 
-    This format matches what the OEDISI DER actuator federates expect.
+    This format matches what the OEDISI Feeder change_commands port expects.
+    Dispatches both active power (Pmpp in kW) and reactive power (kvar in kvar)
+    to OpenDSS PVSystem actuators via the control feeder.
 
     Parameters
     ----------
@@ -383,9 +385,9 @@ def result_to_commands(
 
     Returns
     -------
-    list of (equipment_id, P_watts, Q_vars) tuples
+    list of dicts, each with keys 'obj_name', 'obj_property', 'val'
     """
-    commands = []
+    commands: list[dict[str, Any]] = []
 
     p_gen: pd.DataFrame | None = getattr(result, "active_power_generation", None)
     q_gen: pd.DataFrame | None = getattr(result, "reactive_power_generation", None)
@@ -404,16 +406,19 @@ def result_to_commands(
             continue
 
         p_w = ((prow.get("a", 0.0) or 0.0) + (prow.get("b", 0.0) or 0.0) + (prow.get("c", 0.0) or 0.0)) * S_BASE
+        p_kw = p_w / 1000.0
 
         q_var = 0.0
         if bus_name in q_lookup:
             qrow = q_lookup[bus_name]
             q_var = ((qrow.get("a", 0.0) or 0.0) + (qrow.get("b", 0.0) or 0.0) + (qrow.get("c", 0.0) or 0.0)) * S_BASE
+        q_kvar = q_var / 1000.0
 
         for eq_tag in gen_tags[bus_name]:
             if abs(p_w) < COMMAND_THRESHOLD_W and abs(q_var) < COMMAND_THRESHOLD_W:
                 continue
-            commands.append((eq_tag, float(p_w), float(q_var)))
+            commands.append({"obj_name": eq_tag, "obj_property": "Pmpp", "val": f"{max(0.0, float(p_kw)):.4f}"})
+            commands.append({"obj_name": eq_tag, "obj_property": "kvar", "val": f"{float(q_kvar):.4f}"})
 
     return commands
 

@@ -387,6 +387,14 @@ class DistopfFederate:
             self.sub_case = full_case
         else:
             self.sub_case = area_cases[self.area_name]
+            # Initialize dummy boundary PQ loads to 0.0 to guarantee feasibility before first S_up update
+            dummy_mask = self.sub_case.bus_data["name"].str.startswith("area_")
+            load_cols = [
+                col
+                for col in ["pl_a", "pl_b", "pl_c", "ql_a", "ql_b", "ql_c"]
+                if col in self.sub_case.bus_data.columns
+            ]
+            self.sub_case.bus_data.loc[dummy_mask, load_cols] = 0.0
             logger.debug(
                 "Sub-case built for area '%s': %d buses, %d branches",
                 self.area_name,
@@ -516,9 +524,14 @@ class DistopfFederate:
         _safe_publish(self.pub_solver_stats, stats.json())
 
     def first_pub(self, t: float) -> None:
-        """Publish empty initial values at the start of each timestep's iteration loop."""
+        """Publish empty initial boundary values at the start of each timestep's iteration loop."""
         self._prev_s_up_vals = []
-        self._publish_empty(int(t))
+        empty_v = VoltagesMagnitude(ids=[], values=[], time=int(t))
+        empty_p = PowersReal(ids=[], equipment_ids=[], values=[], time=int(t))
+        empty_q = PowersImaginary(ids=[], equipment_ids=[], values=[], time=int(t))
+        _safe_publish(self.pub_v, empty_v.json())
+        _safe_publish(self.pub_p, empty_p.json())
+        _safe_publish(self.pub_q, empty_q.json())
 
     def itr_pub(self) -> None:
         """Read subscriptions, apply boundary conditions, solve sub-area OPF, publish.
@@ -615,11 +628,17 @@ class DistopfFederate:
             self._current_t = 0
             logger.debug("Starting time/iteration loop")
 
+            total_duration = (
+                self.static.number_of_timesteps * self.static.deltat
+                if self.static.number_of_timesteps > 0
+                else h.HELICS_TIME_MAXTIME
+            )
+
             while True:
-                if self.static.number_of_timesteps > 0 and granted_time >= self.static.number_of_timesteps:
+                if self.static.number_of_timesteps > 0 and granted_time >= total_duration:
                     logger.info(
                         "Reached end time %d. Exiting loop.",
-                        self.static.number_of_timesteps,
+                        total_duration,
                     )
                     break
 
